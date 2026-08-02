@@ -1,0 +1,16 @@
+[project]
+name = "ai-application-factory"
+version = "0.1.0"
+description = "Python services for AI Application Factory"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9"
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]

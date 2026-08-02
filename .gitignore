@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.DS_Store
+backend/data/
+
+# Local credentials and environment overrides.
+.env
+.env.*
+!.env.example
+!.env.template

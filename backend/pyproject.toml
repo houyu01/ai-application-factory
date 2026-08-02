@@ -1,0 +1,21 @@
+[project]
+name = "ai-application-factory-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "openai>=1.0",
+    "pydantic>=2.9",
+    "uvicorn[standard]>=0.32",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

@@ -1,0 +1,14 @@
+{
+  "name": "@ai-application-factory/frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "typescript": "^5.0.0"
+  }
+}
