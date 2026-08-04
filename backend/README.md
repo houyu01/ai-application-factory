@@ -78,12 +78,38 @@ shot_prompt_generator  分镜文本 + 素材 → 视频 Prompt
 
 配置语言模型后，`ScriptPlanner` 会通过 `DramaAgent` 加载上述 skills，并调用
 OpenAI Responses API 生成结构化 JSON。没有配置 `OPENAI_API_KEY` 时使用本地兜底数据，
-图片任务会生成可见的本地预览图，方便先验收完整工作流。
+但图片和视频任务不会伪造成功：未配置多模态凭证时会将任务标记为“生成失败”。
 
-图片任务使用 OpenAI 兼容的 `images.generate`；视频接口没有统一的 OpenAI SDK 协议，
-如需接入实际视频服务，可设置 `VIDEO_GENERATION_ENDPOINT`。该地址接收
-`model/prompt/ratio/duration` JSON，并返回 `url` 或 `video_url`；未设置时会保留任务和
-历史版本记录，但 URL 为空，前端仍可继续编辑和切换历史版本。
+图片和视频调用已经分别接入两类 Provider：
+
+- OpenAI 或 OpenAI-compatible 服务使用 `images.generate` 和 Videos API；
+- 当 endpoint 是火山方舟地址且模型名包含 `seedream` / `seeddream` 或 `seedance` 时，使用
+  方舟的图片生成接口或“创建视频任务 → 轮询 → 获取视频 URL”接口；
+- 如需接入其他视频 Provider，可以设置 `VIDEO_GENERATION_ENDPOINT`。该地址接收
+  `model/prompt/ratio/duration` JSON，并返回 `url` 或 `video_url`。
+
+Provider 直接返回二进制内容时，文件会保存到 `backend/data/media`，再通过
+`GET /api/media/{media_id}` 提供给前端；该目录已加入 `.gitignore`。
+
+### 媒体存储
+
+配置页的“媒体存储”支持四种方式：
+
+- `local`：默认保存到 `backend/data/media`，通过 `/api/media/{media_id}` 访问；
+- `tos`：火山引擎 TOS；
+- `cos`：腾讯云 COS；
+- `oss`：阿里云 OSS。
+
+TOS/COS/OSS 使用 S3 兼容接口上传。需要填写 Endpoint、Bucket、访问密钥和 Region；OSS
+的 Endpoint 例如 `https://oss-cn-hangzhou.aliyuncs.com`，并使用 AccessKey ID 和
+AccessKey Secret。三个云存储均使用 virtual-hosted addressing。Region
+建议一并填写；如果桶不是公开读，需填写 CDN 或公开访问域名作为 `public_base_url`，否则返回的
+对象地址可能无法直接被浏览器播放。SecretKey 只写入本地 SQLite，不会由设置接口返回。
+
+无论模型返回二进制还是临时 URL，图片和视频都会先复制到当前媒体存储，再把最终 URL 写入
+素材或分镜的历史记录。这样切换到 TOS/COS/OSS 后，新生成的视频不会继续落到本地。
+保存 TOS/COS/OSS 配置前，服务会上传一个临时探测文件，再通过最终公开 URL 下载校验并清理；
+上传或公开访问失败时不会覆盖当前配置。私有桶需要配置允许访问的 CDN 或公开域名。
 
 `BaseAgent` 默认扫描 `backend/src/llm_service/skills/*`，并把发现的 Skill
 转换为 Responses API function tools。领域 Agent 只需要覆盖

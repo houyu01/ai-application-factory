@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class EpisodePlannerSkill(BaseSkill):
+    """Skill that groups generated shots into coherent episodes."""
     name = "episode_planner"
     description = "把故事圣经拆解为连续、可追更的多集剧情卡。"
     parameters = {

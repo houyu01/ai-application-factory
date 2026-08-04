@@ -8,6 +8,7 @@ from .base_agent import BaseAgent
 
 
 class InteractiveGameAgent(BaseAgent):
+    """Domain agent that loads the interactive-game planning skills."""
     skill_directories: ClassVar[list[str]] = [
         "backend/src/llm_service/skills/interactive_game/*"
     ]

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>雾城抉择 · 互动视频游戏</title>
+  <style>
+    :root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",sans-serif;background:#0d0f12;color:#f4f6f8}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 12% 0%,#29313c 0,#111419 34%,#0d0f12 78%)}
+    .app{max-width:1240px;margin:0 auto;padding:28px 22px 40px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:22px}.brand{display:flex;align-items:center;gap:12px}.mark{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#e5a35d,#7e8dd0);font-size:20px}.eyebrow{display:block;color:#aeb6c2;font-size:11px;letter-spacing:.18em;text-transform:uppercase}.brand h1{font-size:20px;margin:4px 0 0}.button{border:1px solid #3c444e;background:#20252c;color:#f5f6f7;border-radius:10px;padding:10px 15px;font-size:14px;cursor:pointer}.button:hover{border-color:#e6a35f;background:#2a2a29}.button.primary{border:0;background:#e19b58;color:#17191c;font-weight:700}.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px}.stage,.choices{border:1px solid #2b323b;border-radius:18px;background:#14171c;box-shadow:0 20px 60px #0007}.stage{padding:16px}.video-frame{aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#060708;display:grid;place-items:center}.video-frame video{width:100%;height:100%;object-fit:cover}.video-placeholder{text-align:center;color:#8993a0;padding:30px}.video-placeholder strong{display:block;color:#f4f6f8;font-size:25px;margin:10px 0}.caption{display:flex;align-items:center;justify-content:space-between;padding:14px 4px 3px}.caption strong{font-size:17px}.caption span{color:#9aa4b1;font-size:12px}.choices{padding:20px;min-height:310px}.path{border-bottom:1px solid #2b323b;padding-bottom:17px;margin-bottom:20px}.path label{font-size:12px;color:#8f99a6}.path p{font-size:13px;line-height:1.65;margin:8px 0 0;color:#dce1e8}.choice-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.choice-title strong{font-size:16px}.choice-title span{font-size:12px;color:#8f99a6}.choice-list{display:grid;gap:10px}.choice{display:grid;grid-template-columns:30px 1fr 18px;gap:10px;align-items:center;width:100%;padding:13px 12px;border:1px solid #3a424c;border-radius:12px;background:#20252c;color:#f4f6f8;text-align:left;cursor:pointer}.choice:hover{border-color:#e5a05c;transform:translateY(-1px)}.choice b{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#343b45;color:#f1b26e}.choice i{font-style:normal;color:#a9b2bd}.ending{text-align:center;padding:34px 10px 12px}.ending .symbol{font-size:40px}.ending.success .symbol{color:#82d6a2}.ending.failure .symbol{color:#e88678}.ending h2{margin:12px 0 8px}.ending p{font-size:13px;color:#aab3bf;line-height:1.7}.footer{color:#7f8996;font-size:12px;line-height:1.7;margin:18px 2px 0}@media(max-width:850px){.app{padding:16px}.layout{grid-template-columns:1fr}.choices{min-height:0}.topbar{align-items:flex-start}.topbar .button{padding:8px 10px}}
+  </style>
+</head>
+<body>
+  <div class="app" id="app"></div>
+  <script>
+    const game = {
+      name: '雾城抉择',
+      description: '在雾城醒来的林岩，必须判断谁值得相信。每一次选择都会留下路径。',
+      nodes: [
+        {id:'start',type:'start',title:'雾中醒来',text:'林岩在废弃车站醒来，远处传来一阵短促的铃声。',video:'media/01-start.mp4'},
+        {id:'bridge',type:'normal',title:'桥下的灯',text:'雾气在桥洞下聚拢，一盏旧灯忽明忽暗。',video:'media/02-bridge.mp4'},
+        {id:'archive',type:'normal',title:'墙上的纸条',text:'砖墙上贴着一张湿透的纸条，墨迹指向旧档案馆。',video:'media/03-archive.mp4'},
+        {id:'station',type:'normal',title:'无声的站台',text:'两条线索最终都把林岩带回了没有列车的站台。',video:'media/04-station.mp4'},
+        {id:'truth',type:'success',title:'看见天光',text:'林岩打开档案盒，找到了同伴留下的完整证据，雾城终于迎来天光。',video:'media/05-truth.mp4'},
+        {id:'dawn',type:'success',title:'带她离开',text:'林岩选择相信铃声背后的人，和同伴在第一班晨车到来前离开了雾城。',video:'media/06-dawn.mp4'},
+        {id:'echo',type:'failure',title:'回声尽头',text:'错误的脚步声在隧道里反复回荡，林岩错过了唯一的出口。',video:'media/07-echo.mp4'},
+        {id:'silence',type:'failure',title:'沉入雾中',text:'纸条被撕碎，线索消失在雨水里，雾城再次恢复了沉默。',video:'media/08-silence.mp4'}
+      ],
+      edges: [
+        {from:'start',to:'bridge',text:'跟随桥下的灯'},
+        {from:'start',to:'archive',text:'检查墙上的纸条'},
+        {from:'bridge',to:'station',text:'记住铃声的节奏'},
+        {from:'bridge',to:'echo',text:'直接走进隧道'},
+        {from:'archive',to:'station',text:'把纸条带回站台'},
+        {from:'archive',to:'silence',text:'撕掉纸条离开'},
+        {from:'station',to:'truth',text:'打开旧档案盒'},
+        {from:'station',to:'dawn',text:'相信远处的晨铃'}
+      ]
+    };
+    const state = {nodeId:'start',path:[]};
+    const node = id => game.nodes.find(item => item.id === id);
+    const choices = id => game.edges.filter(edge => edge.from === id);
+    const escapeHtml = value => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+    function render(){
+      const current = node(state.nodeId); const next = choices(current.id); const ended = current.type === 'success' || current.type === 'failure';
+      const path = state.path.length ? state.path.map(item => item.text).join(' → ') : '起点';
+      document.title = `${current.title} · ${game.name}`;
+      document.querySelector('#app').innerHTML = `<header class="topbar"><div class="brand"><span class="mark">✦</span><div><span class="eyebrow">INTERACTIVE VIDEO GAME</span><h1>${escapeHtml(game.name)}</h1></div></div><button class="button" id="restart">重新开始</button></header><div class="layout"><section class="stage"><div class="video-frame">${current.video ? `<video src="${current.video}" autoplay controls playsinline></video>` : `<div class="video-placeholder"><span>VIDEO NODE</span><strong>${escapeHtml(current.title)}</strong><p>当前节点尚未配置视频。</p></div>`}</div><div class="caption"><strong>${escapeHtml(current.title)}</strong><span>${ended ? (current.type === 'success' ? '成功结局' : '失败结局') : `${current.type === 'start' ? '起始视频' : '剧情节点'} · ${current.video ? '视频播放中' : '待补充视频'}`}</span></div></section><aside class="choices"><div class="path"><label>当前选择路径</label><p>${escapeHtml(path)}</p></div>${ended ? `<div class="ending ${current.type}"><div class="symbol">${current.type === 'success' ? '✦' : '○'}</div><h2>${current.type === 'success' ? '成功结局' : '失败结局'}</h2><p>${escapeHtml(current.text)}</p><button class="button primary" id="ending-restart">再玩一次</button></div>` : `<div class="choice-title"><strong>你会怎么选择？</strong><span>${next.length} 个选项</span></div><div class="choice-list">${next.map((edge,index) => `<button class="choice" data-choice="${edge.to}"><b>${String.fromCharCode(65+index)}</b><span>${escapeHtml(edge.text)}</span><i>→</i></button>`).join('')}</div>`}</aside></div><p class="footer">这是一个离线试玩包。视频节点、选择边和路径记录都包含在本地文件中，不需要启动服务端。</p>`;
+      document.querySelector('#restart').onclick = () => {state.nodeId='start';state.path=[];render()};
+      document.querySelector('#ending-restart')?.addEventListener('click', () => {state.nodeId='start';state.path=[];render()});
+      document.querySelectorAll('[data-choice]').forEach((button,index) => button.addEventListener('click', () => {const edge=next[index];state.path.push(edge);state.nodeId=edge.to;render()}));
+    }
+    window.addEventListener('keydown', event => {const next=choices(state.nodeId);const index=Number(event.key)-1;if(index>=0&&index<next.length){state.path.push(next[index]);state.nodeId=next[index].to;render()}});
+    render();
+  </script>
+</body>
+</html>

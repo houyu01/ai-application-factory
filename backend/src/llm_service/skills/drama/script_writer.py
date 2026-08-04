@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class ScriptWriterSkill(BaseSkill):
+    """Skill that expands a premise into a consistent long-form script."""
     name = "script_writer"
     description = "根据分场计划生成单集剧本、动作、对白和可视化信息。"
     parameters = {

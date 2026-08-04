@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class EpisodeSummarizerSkill(BaseSkill):
+    """Skill that summarizes episode-level narrative context."""
     name = "episode_summarizer"
     description = "把已完成的一集压缩为下一集可使用的事实和状态。"
     parameters = {

@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class InteractiveBranchPlannerSkill(BaseSkill):
+    """Skill that expands a game premise into nodes, edges, and endings."""
     name = "interactive_branch_planner"
     description = "把互动剧本拆成可复用视频节点、选项边和成功/失败结局，并允许 DAG 汇合。"
     parameters = {

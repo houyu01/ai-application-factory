@@ -36,6 +36,40 @@ class FakeSyncClient:
         self.responses = FakeSyncResponses(responses)
 
 
+class FakeImageResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeImages:
+    def __init__(self, response):
+        self.response = response
+        self.requests = []
+
+    def generate(self, **request):
+        self.requests.append(request)
+        return self.response
+
+
+class FakeVideoDownload:
+    def read(self):
+        return b"video-bytes"
+
+
+class FakeVideos:
+    def __init__(self):
+        self.create_requests = []
+        self.download_requests = []
+
+    def create_and_poll(self, **request):
+        self.create_requests.append(request)
+        return FakeItem(status="completed", id="video_1")
+
+    def download_content(self, video_id, variant):
+        self.download_requests.append((video_id, variant))
+        return FakeVideoDownload()
+
+
 class FakeAsyncStream:
     def __init__(self, events):
         self.events = events
@@ -105,6 +139,51 @@ def test_completion_uses_sync_client_and_returns_text_after_tool_round():
 
 def test_completion_stream_yields_text_and_executes_tool():
     asyncio.run(_test_completion_stream_yields_text_and_executes_tool())
+
+
+def test_generate_image_returns_provider_url():
+    sync_client = FakeSyncClient([])
+    sync_client.images = FakeImages(
+        FakeImageResponse([FakeItem(url="https://cdn.example/image.png")])
+    )
+    client = make_client(sync_client=sync_client)
+
+    result = client.generate_image("一只鸟", size="1024x1024")
+
+    assert result["url"] == "https://cdn.example/image.png"
+    assert sync_client.images.requests[0]["model"] == "test-model"
+
+
+def test_generate_video_polls_and_downloads_provider_content():
+    sync_client = FakeSyncClient([])
+    sync_client.videos = FakeVideos()
+    client = make_client(sync_client=sync_client)
+
+    result = client.generate_video("一只鸟飞过森林", ratio="9:16", seconds=10)
+
+    assert result["content"] == b"video-bytes"
+    assert result["seconds"] == 8
+    assert sync_client.videos.create_requests[0]["size"] == "720x1280"
+    assert sync_client.videos.download_requests == [("video_1", "video")]
+
+
+def test_generate_video_passes_first_rich_prompt_reference_to_openai():
+    sync_client = FakeSyncClient([])
+    sync_client.videos = FakeVideos()
+    client = make_client(sync_client=sync_client)
+
+    client.generate_video(
+        "连续长镜头",
+        ratio="9:16",
+        reference_images=[
+            "https://cdn.example/character.png",
+            "https://cdn.example/scene.png",
+        ],
+    )
+
+    assert sync_client.videos.create_requests[0]["input_reference"] == {
+        "image_url": "https://cdn.example/character.png"
+    }
 
 
 async def _test_completion_stream_yields_text_and_executes_tool():
