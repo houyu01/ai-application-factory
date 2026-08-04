@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from typing import Any
 
 from ..domain.models import (
@@ -13,10 +14,21 @@ from ..domain.models import (
     InteractiveGameCreate,
 )
 from ..infrastructure.interactive_game_repository import InteractiveGameRepository
+from ..infrastructure.media_store import media_store
 from ..llm_service.interactive_game_planner import InteractiveGamePlanner
 
 
+logger = logging.getLogger(__name__)
+
+
 class InteractiveGameService:
+    """Coordinate interactive-game creation, decomposition, and runtime edits.
+
+    The game API calls this service after form submission or editor actions; it
+    keeps graph persistence, planner execution, and media cleanup out of the
+    FastAPI route layer.
+    """
+
     def __init__(
         self,
         repository: InteractiveGameRepository | None = None,
@@ -42,6 +54,51 @@ class InteractiveGameService:
         if game is None:
             raise KeyError(f"Interactive game not found: {game_id}")
         return game
+
+    def delete_game(self, game_id: str) -> dict[str, Any]:
+        """Delete the complete game graph, runtime history, and owned media."""
+
+        game = self.get_game(game_id)
+        media_urls = self._collect_media_urls(game)
+        self.repository.delete_game(game_id)
+
+        media_deleted = 0
+        cleanup_errors: list[str] = []
+        for url in media_urls:
+            try:
+                if media_store.delete_url(url):
+                    media_deleted += 1
+            except Exception as exc:  # cloud cleanup must not undo DB deletion
+                cleanup_errors.append(str(exc))
+                logger.warning("Failed to delete game media %s: %s", url, exc)
+
+        result: dict[str, Any] = {
+            "status": "deleted",
+            "id": game_id,
+            "media_deleted": media_deleted,
+        }
+        if cleanup_errors:
+            result["media_cleanup_errors"] = cleanup_errors
+        return result
+
+    @staticmethod
+    def _collect_media_urls(value: Any) -> set[str]:
+        urls: set[str] = set()
+
+        def visit(node: Any) -> None:
+            if isinstance(node, dict):
+                for key, child in node.items():
+                    if key in {"image_url", "video_url", "url"} and isinstance(child, str):
+                        if child.strip():
+                            urls.add(child.strip())
+                    elif isinstance(child, (dict, list)):
+                        visit(child)
+            elif isinstance(node, list):
+                for child in node:
+                    visit(child)
+
+        visit(value)
+        return urls
 
     def decompose_game(self, task_id: str, game_id: str) -> None:
         try:
@@ -75,13 +132,24 @@ class InteractiveGameService:
             raise KeyError(f"Interactive game not found: {game_id}")
         if not any(node["id"] == node_id for node in game["nodes"]):
             raise KeyError(f"Game node not found: {node_id}")
+        active_task = self.repository.get_active_task(
+            game_id, "node_video_generation", node_id
+        )
+        if active_task is not None:
+            return {**active_task, "_reused": True}
         task = self.repository.create_task(
             game_id,
             "node_video_generation",
             node_id,
             {"game_id": game_id, "node_id": node_id},
         )
-        return self.repository.update_task_status(task["id"], GenerationStatus.GENERATING)
+        self.repository.update_node(
+            game_id, node_id, {"status": GenerationStatus.GENERATING.value}
+        )
+        return {
+            **self.repository.update_task_status(task["id"], GenerationStatus.GENERATING),
+            "_reused": False,
+        }
 
     def run_node_video(
         self,
@@ -104,6 +172,12 @@ class InteractiveGameService:
                 result={"node_id": node_id, **video},
             )
         except Exception as exc:
+            try:
+                self.repository.update_node(
+                    game_id, node_id, {"status": GenerationStatus.FAILED.value}
+                )
+            except KeyError:
+                logger.warning("Game node disappeared while video task failed: %s", node_id)
             self.repository.update_task_status(
                 task_id, GenerationStatus.FAILED, error_message=str(exc)
             )
@@ -113,6 +187,21 @@ class InteractiveGameService:
         if task is None:
             raise KeyError(f"Game task not found: {task_id}")
         return task
+
+    def resume_task(self, task: dict[str, Any]) -> None:
+        """Resume a persisted game task after a process restart."""
+        task_type = str(task.get("type") or "")
+        game_id = str(task.get("game_id") or "")
+        resource_id = str(task.get("resource_id") or "")
+        if task_type == "game_graph_decomposition":
+            self.decompose_game(task["id"], game_id)
+        elif task_type == "node_video_generation":
+            self.run_node_video(task["id"], game_id, resource_id)
+        else:
+            self.repository.update_task_status(
+                task["id"], GenerationStatus.FAILED,
+                error_message=f"未知的游戏任务类型：{task_type}",
+            )
 
     def update_node(
         self, game_id: str, node_id: str, payload: GameNodeUpdate

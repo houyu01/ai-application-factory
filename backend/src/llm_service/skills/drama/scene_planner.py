@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class ScenePlannerSkill(BaseSkill):
+    """Skill that identifies and structures reusable drama locations."""
     name = "scene_planner"
     description = "把单集剧情卡拆成有因果关系的分场和镜头目标。"
     parameters = {

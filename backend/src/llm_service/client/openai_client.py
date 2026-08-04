@@ -11,33 +11,12 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from collections.abc import AsyncIterator, Callable, Mapping
-from dataclasses import dataclass, field
-from typing import Any, TypeAlias
+import base64
+from collections.abc import AsyncIterator, Mapping
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAI
-
-
-ToolExecutor: TypeAlias = Callable[[str, dict[str, Any]], Any]
-
-
-@dataclass(slots=True)
-class OpenAIClientBaseOptions:
-    """Configuration for an ``OpenAICLient`` instance.
-
-    ``base_url`` is useful for OpenAI-compatible providers. Credentials are
-    intentionally read from options or environment variables; API keys must
-    not be committed to the repository.
-    """
-
-    system_messages: list[dict[str, Any]] = field(default_factory=list)
-    api_key: str | None = None
-    base_url: str | None = None
-    model: str | None = None
-
-
-# Keep the original public name working for callers that already imported it.
-OpenAICLientBaseOption = OpenAIClientBaseOptions
+from .openai_types import OpenAICLientBaseOption, OpenAIClientBaseOptions, ToolExecutor
 
 
 class OpenAICLient:
@@ -79,6 +58,113 @@ class OpenAICLient:
         """Create a client with an initialized conversation history."""
 
         return cls(base_options, **kwargs)
+
+    def generate_image(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        size: str = "1024x1024",
+        quality: str | None = None,
+        n: int = 1,
+    ) -> dict[str, Any]:
+        """Generate one or more images through the provider's Image API."""
+
+        kwargs: dict[str, Any] = {
+            "model": model or self.model,
+            "prompt": prompt,
+            "size": size,
+            "n": n,
+        }
+        if quality:
+            kwargs["quality"] = quality
+        response = self.sync_client.images.generate(**kwargs)
+        data = getattr(response, "data", None) or []
+        if not data:
+            raise RuntimeError("图片模型没有返回图片结果")
+        item = data[0]
+        url = getattr(item, "url", None)
+        if url:
+            return {"url": str(url), "content": None, "content_type": "image/png"}
+        encoded = getattr(item, "b64_json", None)
+        if encoded:
+            return {
+                "url": None,
+                "content": base64.b64decode(encoded),
+                "content_type": "image/png",
+            }
+        raise RuntimeError("图片模型没有返回 url 或 b64_json")
+
+    def probe_audio(self, text: str = "模型连接测试", *, voice: str = "alloy") -> None:
+        """Send a short speech request to verify an OpenAI-compatible audio model."""
+
+        audio = getattr(self.sync_client, "audio", None)
+        speech = getattr(audio, "speech", None) if audio is not None else None
+        if speech is None or not hasattr(speech, "create"):
+            raise RuntimeError("当前 OpenAI SDK/client 不支持音频生成")
+        response = speech.create(
+            model=self.model,
+            voice=voice,
+            input=text,
+            response_format="mp3",
+        )
+        if response is None:
+            raise RuntimeError("音频模型没有返回结果")
+
+    def generate_video(
+        self,
+        prompt: str,
+        *,
+        model: str | None = None,
+        ratio: str = "9:16",
+        resolution: str = "720p",
+        seconds: int = 8,
+        reference_images: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Create, poll, and download a video through the Videos API.
+
+        OpenAI's video API is asynchronous.  The SDK's ``create_and_poll``
+        helper keeps polling out of the application layer; the completed
+        binary is returned so the caller can persist it in its own storage.
+        """
+
+        videos = getattr(self.sync_client, "videos", None)
+        if videos is None:
+            raise RuntimeError("当前 OpenAI SDK/client 不支持视频生成")
+
+        allowed_seconds = (4, 8, 12)
+        normalized_seconds = min(allowed_seconds, key=lambda value: abs(value - seconds))
+        if resolution == "480p":
+            size = "480x854" if ratio == "9:16" else "854x480"
+        else:
+            size = "720x1280" if ratio == "9:16" else "1280x720"
+        video = videos.create_and_poll(
+            model=model or self.model,
+            prompt=prompt,
+            seconds=str(normalized_seconds),
+            size=size,
+            **(
+                {"input_reference": {"image_url": reference_images[0]}}
+                if reference_images
+                else {}
+            ),
+        )
+        status = getattr(video, "status", None)
+        if status != "completed":
+            error = getattr(getattr(video, "error", None), "message", None)
+            raise RuntimeError(error or f"视频生成失败，状态：{status}")
+        video_id = getattr(video, "id", None)
+        if not video_id:
+            raise RuntimeError("视频模型没有返回任务 ID")
+        content = videos.download_content(video_id, variant="video")
+        return {
+            "url": None,
+            "content": content.read(),
+            "content_type": "video/mp4",
+            "provider_id": str(video_id),
+            "seconds": normalized_seconds,
+            "size": size,
+        }
 
     # 同步的调用LLM的方法
     def completion(
@@ -359,8 +445,6 @@ class OpenAICLient:
     def _validate_tool_rounds(max_tool_rounds: int) -> None:
         if max_tool_rounds < 0:
             raise ValueError("max_tool_rounds must be >= 0")
-
-
 # More idiomatic spelling for new callers; keep the historical misspelling
 # above so existing imports do not break.
 OpenAIClient = OpenAICLient

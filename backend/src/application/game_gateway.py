@@ -1,20 +1,16 @@
 """Gateway layer for interactive game API use cases."""
 
-from fastapi import BackgroundTasks
-
 from .game_service import InteractiveGameService, game_service
 
 
 class InteractiveGameGateway:
+    """Compose the interactive-game API use cases exposed to FastAPI routes."""
+
     def __init__(self, service: InteractiveGameService) -> None:
         self.service = service
 
-    def create_game(self, payload, background_tasks: BackgroundTasks):
-        game = self.service.create_game(payload)
-        background_tasks.add_task(
-            self.service.decompose_game, game["task_id"], game["id"]
-        )
-        return game
+    def create_game(self, payload, background_tasks=None):
+        return self.service.create_game(payload)
 
 
 game_gateway = InteractiveGameGateway(game_service)

@@ -37,6 +37,25 @@ def test_game_creation_and_graph_decomposition(tmp_path):
     assert saved["tasks"][0]["status"] == "生成成功"
 
 
+def test_game_model_selection_is_persisted(tmp_path):
+    service = make_service(tmp_path)
+    game = service.create_game(make_payload())
+    assert game["video_model"] == "doubao-seedance-2.0"
+
+    updated = service.repository.update_model_selection(
+        game["id"],
+        {
+            "language_model": "game-language-v2",
+            "multimodal_model": "game-image-v2",
+            "video_model": "game-video-v2",
+        },
+    )
+
+    assert updated["language_model"] == "game-language-v2"
+    assert updated["multimodal_model"] == "game-image-v2"
+    assert updated["video_model"] == "game-video-v2"
+
+
 def test_game_node_and_edge_can_be_edited(tmp_path):
     service = make_service(tmp_path)
     game = service.create_game(make_payload())
@@ -44,6 +63,14 @@ def test_game_node_and_edge_can_be_edited(tmp_path):
     saved = service.get_game(game["id"])
     first_node = saved["nodes"][0]
     second_node = saved["nodes"][1]
+
+    video_task = service.enqueue_node_video(game["id"], first_node["id"])
+    repeated_video_task = service.enqueue_node_video(game["id"], first_node["id"])
+    assert repeated_video_task["id"] == video_task["id"]
+    assert video_task["_reused"] is False
+    assert repeated_video_task["_reused"] is True
+    assert service.get_game(game["id"])["nodes"][0]["status"] == "生成中"
+    assert service.get_task(video_task["id"])["status"] == "生成中"
 
     updated_node = service.update_node(
         game["id"],
@@ -84,3 +111,17 @@ def test_runtime_session_returns_video_choices_and_records_path(tmp_path):
     assert next_state["path"][0]["edge_id"] == start_edge["id"]
     assert next_state["current_node"]["id"] == start_edge["target_node_id"]
     assert next_state["choices"]
+
+
+def test_delete_game_removes_graph_tasks_and_runtime_rows(tmp_path):
+    service = make_service(tmp_path)
+    game = service.create_game(make_payload())
+    service.decompose_game(game["task_id"], game["id"])
+    saved = service.get_game(game["id"])
+    session = service.create_session(game["id"])
+
+    result = service.delete_game(game["id"])
+
+    assert result["status"] == "deleted"
+    assert service.repository.get_game(game["id"]) is None
+    assert service.repository.get_session(session["id"]) is None

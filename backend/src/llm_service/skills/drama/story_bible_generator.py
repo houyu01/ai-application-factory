@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class StoryBibleGeneratorSkill(BaseSkill):
+    """Skill that extracts a stable story bible from a drama premise."""
     name = "story_bible_generator"
     description = "根据创意和扩写结果生成可长期维护的故事圣经。"
     parameters = {

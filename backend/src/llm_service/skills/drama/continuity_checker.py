@@ -2,6 +2,7 @@ from src.llm_service.skills.base import BaseSkill
 
 
 class ContinuityCheckerSkill(BaseSkill):
+    """Skill that checks shot continuity and reports actionable issues."""
     name = "continuity_checker"
     description = "检查长篇剧本的人物、时间线、伏笔和因果连续性。"
     parameters = {

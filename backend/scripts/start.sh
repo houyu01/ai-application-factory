@@ -3,6 +3,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Load local development credentials when present. The settings page can
+# override these values in SQLite, while this keeps the documented
+# src/.env.development fallback usable for every provider.
+ENV_CONFIG_FILE="${ENV_CONFIG_FILE:-src/.env.development}"
+if [ -f "$ENV_CONFIG_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_CONFIG_FILE"
+  set +a
+fi
+
 START_PORT="${PORT:-8090}"
 HOST="${HOST:-127.0.0.1}"
 

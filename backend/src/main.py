@@ -1,9 +1,25 @@
 """FastAPI application entry point."""
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .api.router import api_router
+from .application.task_worker import durable_task_worker
 
-app = FastAPI(title="AI Application Factory API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    durable_task_worker.start()
+    try:
+        yield
+    finally:
+        durable_task_worker.stop()
+
+
+app = FastAPI(
+    title="AI Application Factory API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -20,4 +36,5 @@ app.include_router(api_router, prefix="/api")
 
 @app.get("/health")
 def health_check() -> dict[str, str]:
+    """Return liveness for the frontend or process supervisor health probe."""
     return {"status": "ok"}
