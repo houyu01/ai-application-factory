@@ -53,7 +53,7 @@ def test_ark_video_generation_creates_and_polls_until_succeeded():
             {
                 "id": "task-1",
                 "status": "succeeded",
-                "content": {"video_url": {"url": "https://cdn.example/video.mp4"}},
+                "content": {"video_url": "https://cdn.example/video.mp4"},
             },
         ]
     )
@@ -106,6 +106,29 @@ def test_ark_video_generation_uses_configured_create_and_query_urls():
     ]
 
 
+def test_ark_video_cancel_uses_the_provider_delete_task_endpoint():
+    """Cancelling a shot must call Ark's DeleteContentsGenerationsTasks API."""
+
+    requests = []
+
+    def opener(request, timeout):
+        requests.append((request.full_url, request.method, request.data))
+        return FakeResponse({"id": "remote-task/1", "status": "cancelled"})
+
+    result = ArkClient(
+        api_key="ark-test-key",
+        model="custom-video-model",
+        create_url="https://provider.example/create-task",
+        query_url="https://provider.example/query/{id}",
+        opener=opener,
+    ).cancel_video_task("remote-task/1")
+
+    assert result["status"] == "cancelled"
+    assert requests == [
+        ("https://provider.example/query/remote-task%2F1", "DELETE", None)
+    ]
+
+
 def test_ark_video_create_task_sends_prompt_and_reference_images():
     """Video generation submits rich prompt text together with selected asset images."""
 
@@ -135,10 +158,85 @@ def test_ark_video_create_task_sends_prompt_and_reference_images():
         "model": "custom-video-model",
         "content": [
             {"type": "text", "text": "分镜提示词"},
-            {"type": "image_url", "image_url": {"url": "https://cdn.example/character.png"}},
-            {"type": "image_url", "image_url": {"url": "https://cdn.example/scene.png"}},
+            {
+                "type": "image_url",
+                "image_url": {"url": "https://cdn.example/character.png"},
+                "role": "reference_image",
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": "https://cdn.example/scene.png"},
+                "role": "reference_image",
+            },
         ],
+        "generate_audio": True,
         "ratio": "9:16",
         "duration": 8,
+        "watermark": False,
         "resolution": "720p",
     }
+
+
+def test_ark_video_create_task_sends_boundary_images_as_references():
+    """Boundary frames stay in the one reference-image input mode Ark accepts."""
+
+    requests = []
+
+    def opener(request, timeout):
+        requests.append(request)
+        return FakeResponse({"id": "task-with-boundary-frames"})
+
+    client = ArkClient(
+        api_key="ark-test-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        model="doubao-seedance-test",
+        opener=opener,
+    )
+    client.create_video_task(
+        "@图2 是视频首帧，@图3 是视频尾帧。",
+        reference_images=[
+            "https://cdn.example/character.jpg",
+            "https://cdn.example/first.jpg",
+            "https://cdn.example/last.jpg",
+        ],
+    )
+
+    content = json.loads(requests[0].data)["content"]
+    assert content == [
+        {
+            "type": "text",
+            "text": "@图2 是视频首帧，@图3 是视频尾帧。",
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://cdn.example/character.jpg"},
+            "role": "reference_image",
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://cdn.example/first.jpg"},
+            "role": "reference_image",
+        },
+        {
+            "type": "image_url",
+            "image_url": {"url": "https://cdn.example/last.jpg"},
+            "role": "reference_image",
+        },
+    ]
+
+
+def test_ark_video_poll_reads_the_plan_api_response_shape():
+    """The durable worker can consume Ark's top-level status and content URL."""
+
+    payload = {
+        "id": "cgt-20260805135906-vkqzn",
+        "model": "doubao-seedance-2.0",
+        "status": "succeeded",
+        "content": {"video_url": "https://cdn.example/generated.mp4"},
+        "resolution": "720p",
+        "ratio": "1:1",
+        "duration": 5,
+    }
+
+    assert ArkClient._read_status(payload) == "succeeded"
+    assert ArkClient._read_video_url(payload) == "https://cdn.example/generated.mp4"

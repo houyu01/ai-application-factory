@@ -363,6 +363,81 @@ def test_shot_video_is_appended_to_shot_and_drama_history(tmp_path):
     assert saved["historical_videos"][0]["shot_id"] == shot_id
 
 
+def test_unsupported_video_model_fails_task_shot_and_version(tmp_path, monkeypatch):
+    """An Ark submission error must stop loading and survive a page refresh."""
+
+    service = make_service(tmp_path)
+    project = service.create_project(make_payload())
+    service.decompose_project(project["task_id"], project["id"])
+    shot_id = service.get_project(project["id"])["shots"][0]["id"]
+    mark_decomposition_assets_ready(service, project["id"])
+    task = service.enqueue("shot_video", project["id"], shot_id)
+    monkeypatch.setattr(
+        service,
+        "_provider_options",
+        lambda _project, _kind: {
+            "api_key": "test-key",
+            "endpoint": "https://ark.cn-beijing.volces.com/api/plan/v3",
+            "create_url": "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks",
+            "query_url": "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/{id}",
+            "model": "unsupported-video-model",
+        },
+    )
+
+    def reject_model(*_args, **_kwargs):
+        raise RuntimeError(
+            'Ark API 请求失败（HTTP 404）：{"error":{"code":"UnsupportedModel",'
+            '"message":"The requested model does not support the agent plan feature."}}'
+        )
+
+    monkeypatch.setattr(
+        "src.application.task_service_worker_mixin.ArkClient.create_video_task",
+        reject_model,
+    )
+    service.advance_shot_video_task(service.get_task(task["id"]))
+
+    saved = service.get_project(project["id"])
+    saved_task = service.get_task(task["id"])
+    saved_shot = saved["shots"][0]
+    assert saved_task["status"] == GenerationStatus.FAILED.value
+    assert saved_shot["status"] == GenerationStatus.FAILED.value
+    assert saved_shot["versions"][0]["status"] == GenerationStatus.FAILED.value
+    assert "全局参数 → 视频模型" in saved_task["error_message"]
+    assert "unsupported-video-model" in saved_shot["versions"][0]["error_message"]
+
+
+def test_sensitive_boundary_frame_fails_task_with_replacement_guidance(tmp_path, monkeypatch):
+    """Ark privacy moderation must become a recoverable, user-facing task error."""
+
+    service = make_service(tmp_path)
+    project = service.create_project(make_payload())
+    service.decompose_project(project["task_id"], project["id"])
+    shot_id = service.get_project(project["id"])["shots"][0]["id"]
+    mark_decomposition_assets_ready(service, project["id"])
+    task = service.enqueue("shot_video", project["id"], shot_id)
+    monkeypatch.setattr(
+        service,
+        "_provider_options",
+        lambda _project, _kind: {
+            "api_key": "test-key",
+            "endpoint": "https://ark.cn-beijing.volces.com/api/plan/v3",
+            "create_url": "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks",
+            "query_url": "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/{id}",
+            "model": "doubao-seedance-2.0",
+        },
+    )
+    monkeypatch.setattr(
+        "src.application.task_service_worker_mixin.ArkClient.create_video_task",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(
+            'Ark API 请求失败（HTTP 400）：{"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation"}}'
+        )),
+    )
+
+    service.advance_shot_video_task(service.get_task(task["id"]))
+
+    assert "更换为不含真实人物面部" in service.get_task(task["id"])["error_message"]
+
+
 def test_long_shot_prompt_template_is_selected_and_snapshotted(tmp_path):
     """A shot's selected mode must survive queueing and produce one long camera take."""
 

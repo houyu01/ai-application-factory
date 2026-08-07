@@ -34,6 +34,7 @@ class ScriptPlannerRepairMixin:
 
         source = _script_planner()._clean_script(script)
         style = str(runtime.get("style") or "真人风格")
+        theme = str(runtime.get("theme") or "都市")
         fallback = _script_planner()._fallback_asset_catalog(source, runtime)
         fallback_by_type = {
             asset_type: [asset for asset in fallback if asset["type"] == asset_type]
@@ -68,7 +69,7 @@ class ScriptPlannerRepairMixin:
                 continue
             index = type_counts[asset_type]
             if asset_type == "character":
-                prompt = _script_planner()._character_prompt(name, prompt, style, index)
+                prompt = _script_planner()._character_prompt(name, prompt, style, index, theme)
             elif asset_type == "scene":
                 prompt = _script_planner()._scene_prompt(
                     name,
@@ -76,9 +77,11 @@ class ScriptPlannerRepairMixin:
                     prompt,
                     "场景内的桌椅、门窗、灯具和线索物件按剧情状态摆放，保留真实使用痕迹",
                     "色调和光线服务于当前剧情情绪；无人物，无背景文字。",
+                    theme,
                 )
             else:
                 prompt = (
+                    f"{_script_planner()._asset_theme_constraint(theme, 'prop')}\n"
                     f"{name}\n颜色、材质与细节：{prompt}\n"
                     "装饰、磨损与表面文字：保持关键纹样、刻字和使用痕迹稳定。\n"
                     "主体道具清晰完整，适合作为短剧道具素材参考图。"
@@ -161,9 +164,13 @@ class ScriptPlannerRepairMixin:
             if name and prompt:
                 assets.append({"id": raw_asset.get("id") or f"asset_{asset_index}", "type": type_name, "name": name, "prompt": prompt})
 
-        assets = _script_planner()._repair_asset_catalog(assets, script, runtime)
-        if episodes:
-            episodes = _script_planner()._repair_shot_segments(episodes, script, runtime)
+        planner = _script_planner()
+        assets = planner._repair_asset_catalog(assets, script, runtime)
+        # Long-form batches already own their episode boundaries and shot text.
+        # Applying the legacy short-script repair here would redistribute the
+        # complete 50-episode screenplay across all shots and destroy that plan.
+        if episodes and not planner._is_long_form_screenplay(script, runtime):
+            episodes = planner._repair_shot_segments(episodes, script, runtime)
         if not episodes:
             fallback = _script_planner()._fallback_plan(script, runtime)
             episodes = episodes or fallback["episodes"]

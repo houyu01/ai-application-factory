@@ -15,6 +15,7 @@ from src.domain.models import (
 )
 from src.infrastructure.media_store import media_store
 from src.infrastructure.sqlite_repository import SQLiteRepository
+from src.llm_service.client.ark_client import ArkClient
 from src.main import app
 
 
@@ -103,7 +104,7 @@ def test_generate_placeholder_image_is_exposed_over_http(monkeypatch) -> None:
 
 
 class _PlaceholderPlanner:
-    """Provides the minimum generated assets needed to exercise local composition."""
+    """Provide scene, character, and prop assets for clean placeholder generation."""
 
     def plan(self, script: str) -> dict:
         return {
@@ -111,12 +112,13 @@ class _PlaceholderPlanner:
             "assets": [
                 {"type": "character", "name": "林岩", "prompt": "青年剑修"},
                 {"type": "scene", "name": "山门前", "prompt": "清晨的山门"},
+                {"type": "prop", "name": "木剑", "prompt": "磨损的古朴木剑"},
             ],
         }
 
 
 def _image_bytes(color: tuple[int, int, int]) -> bytes:
-    """Create a tiny valid source image for the local placeholder compositor."""
+    """Create a tiny valid image returned by the mocked image provider."""
 
     image = Image.new("RGB", (80, 60), color)
     output = BytesIO()
@@ -124,27 +126,54 @@ def _image_bytes(color: tuple[int, int, int]) -> bytes:
     return output.getvalue()
 
 
-def test_placeholder_task_composes_layout_and_adds_shot_reference(tmp_path, monkeypatch) -> None:
-    """The durable worker must persist the generated layout and rich-prompt reference."""
+def test_placeholder_task_generates_clean_composite_and_adds_reference(
+    tmp_path, monkeypatch
+) -> None:
+    """The worker must generate a clean composite and persist it as a new version."""
 
     media_root = tmp_path / "media"
     media_root.mkdir()
     monkeypatch.setattr(media_store, "root", media_root)
     media_store.configure({"provider": "local"})
     service = TaskService(SQLiteRepository(tmp_path / "drama.db"), _PlaceholderPlanner())
+    service.settings["multimodal"] = {
+        "api_key": "test-key",
+        "endpoint": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "model": "doubao-seeddream-test",
+    }
     project = service.create_project(
-        ProjectCreate(name="山门相遇", script="林岩清晨来到山门前，准备拜见师父。")
+        ProjectCreate(name="山门相遇", script="林岩带着木剑来到山门前，准备拜见师父。")
     )
     service.decompose_project(project["task_id"], project["id"])
     saved = service.get_project(project["id"])
     character = next(asset for asset in saved["assets"] if asset["type"] == "character")
     scene = next(asset for asset in saved["assets"] if asset["type"] == "scene")
+    prop = next(asset for asset in saved["assets"] if asset["type"] == "prop")
     service.repository.set_asset_image(
         project["id"], character["id"], media_store.save(_image_bytes((210, 180, 150)), ".png")
     )
     service.repository.set_asset_image(
         project["id"], scene["id"], media_store.save(_image_bytes((80, 130, 180)), ".png")
     )
+    service.repository.set_asset_image(
+        project["id"], prop["id"], media_store.save(_image_bytes((120, 90, 60)), ".png")
+    )
+    generated: dict[str, object] = {}
+
+    def generate_image(
+        _client: ArkClient,
+        prompt: str,
+        *,
+        reference_images: list[str] | None = None,
+        size: str = "2K",
+    ) -> dict[str, object]:
+        generated.update(prompt=prompt, reference_images=reference_images, size=size)
+        return {
+            "content": _image_bytes((30, 70, 110)),
+            "content_type": "image/png",
+        }
+
+    monkeypatch.setattr(ArkClient, "generate_image", generate_image)
 
     shot = service.get_project(project["id"])["shots"][0]
     task = service.enqueue_placeholder_image(
@@ -160,4 +189,53 @@ def test_placeholder_task_composes_layout_and_adds_shot_reference(tmp_path, monk
     placeholder = service.repository.get_asset(project["id"], task["resource_id"])
     assert completed["status"] == GenerationStatus.SUCCEEDED.value
     assert placeholder["image_url"].startswith("/api/media/")
+    assert placeholder["metadata"]["render_mode"] == "generated_composite"
+    assert placeholder["metadata"]["version"] == 1
+    assert placeholder["metadata"]["reference_asset_ids"] == [
+        scene["id"],
+        character["id"],
+        prop["id"],
+    ]
+    assert len(generated["reference_images"]) == 3
+    assert "无编辑痕迹" in str(generated["prompt"])
+    assert "不要方框" in str(generated["prompt"])
     assert any(node.get("asset_id") == placeholder["id"] for node in updated_shot["prompt_rich"])
+
+
+def test_video_references_ignore_legacy_boxed_placeholder() -> None:
+    """Video input must ignore editor exports and use clean generated placeholders."""
+
+    project = {
+        "assets": [
+            {
+                "id": "legacy-placeholder",
+                "type": "placeholder",
+                "image_url": "https://example.com/boxed.png",
+                "metadata": {"shot_id": "shot-1"},
+            },
+            {
+                "id": "clean-placeholder",
+                "type": "placeholder",
+                "image_url": "https://example.com/clean.png",
+                "metadata": {"render_mode": "generated_composite"},
+            },
+        ]
+    }
+    shot = {
+        "prompt_rich": [
+            {
+                "type": "reference",
+                "asset_id": "legacy-placeholder",
+                "asset_type": "placeholder",
+            },
+            {
+                "type": "reference",
+                "asset_id": "clean-placeholder",
+                "asset_type": "placeholder",
+            },
+        ]
+    }
+
+    assert TaskService._video_reference_images(project, shot) == [
+        "https://example.com/clean.png"
+    ]

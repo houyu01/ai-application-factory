@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from .router_common import api_router, drama_gateway, media_store, request_public_media_base_url, task_service
+from ..infrastructure.sqlite_repository_mapping import DramaRepositoryMappingMixin
 from ..domain.models import (
     GameEdgeCreate,
     GameEdgeUpdate,
@@ -53,22 +54,23 @@ def create_project(payload: ProjectCreate, background_tasks: BackgroundTasks):
     return drama_gateway.create_project(payload, background_tasks)
 
 @api_router.get("/projects/{project_id}")
-def get_project(project_id: str):
+def get_project(project_id: str, shot_id: str | None = None):
     """Frontend route: called when the console performs the get project action; returns the persisted result or an asynchronous task status."""
     try:
-        return task_service.get_project(project_id)
+        return task_service.get_editor_project(project_id, shot_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _task_status_payload(task: dict[str, Any]) -> dict[str, Any]:
-    """Expose polling metadata without returning task input/output payloads."""
-    fields = (
-        "id", "type", "status", "project_id", "resource_id", "progress", "stage",
-        "provider_task_id", "next_poll_at", "created_at", "started_at",
-        "completed_at", "finished_at", "error_message",
-    )
-    return {field: task.get(field) for field in fields}
+    """Expose polling metadata and the bounded screenplay preview for the banner."""
+    fields = ("id", "type", "status", "project_id", "resource_id", "progress", "stage", "provider_task_id", "next_poll_at", "created_at", "started_at", "completed_at", "finished_at", "error_message")
+    payload = {field: task.get(field) for field in fields}
+    snapshot = task.get("input_snapshot")
+    preview = snapshot.get("expanded_script_preview") if task.get("type") == "script_decomposition" and isinstance(snapshot, dict) else None
+    if isinstance(preview, str):
+        payload["input_snapshot"] = {"expanded_script_preview": DramaRepositoryMappingMixin._detail_expanded_preview(preview)}
+    return payload
 
 
 @api_router.get("/projects/{project_id}/tasks")
@@ -142,16 +144,11 @@ def update_project_models(project_id: str, payload: ModelSelectionUpdate):
 
 @api_router.put("/projects/{project_id}/parameters")
 def update_project_parameters(project_id: str, payload: ProjectParametersUpdate):
-    """Frontend route: called when the console performs the update project parameters action; returns the persisted result or an asynchronous task status."""
+    """Save Global Parameters changes without enqueuing prompt or video generation."""
     try:
-        task_service.repository.update_project_parameters(
+        return task_service.repository.update_project_parameters(
             project_id, payload.model_dump(exclude_none=True)
         )
-        project = task_service.get_project(project_id)
-        refresh_tasks = []
-        for shot in project.get("shots", []):
-            refresh_tasks.append(task_service.enqueue("shot_prompt", project_id, shot["id"]))
-        return {**project, "refresh_tasks": refresh_tasks}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -383,7 +380,7 @@ def create_project_shot(project_id: str, payload: DramaShotCreate):
 
 @api_router.put("/projects/{project_id}/shots/{shot_id}")
 def update_project_shot(project_id: str, shot_id: str, payload: DramaShotUpdate):
-    """Save title, source text, or rich prompt fields edited in the shot editor."""
+    """Save shot fields after edits to text, prompt, duration, or selected references."""
     try:
         return task_service.repository.update_shot(
             project_id, shot_id, **payload.model_dump(exclude_none=True)
@@ -440,7 +437,9 @@ def list_shot_versions(project_id: str, shot_id: str):
 
 
 from . import settings_routes  # noqa: F401  # register settings endpoints
-
 from . import game_routes  # noqa: F401  # register game endpoints on the shared router
-
 from . import placeholder_routes  # noqa: F401  # register shot placeholder endpoints
+
+from . import cover_routes  # noqa: F401  # register durable cover-image endpoints
+from . import project_metadata_routes  # noqa: F401  # register project metadata endpoints
+from . import asset_batch_routes, expanded_script_routes, script_retry_routes, video_history_routes  # noqa: F401  # register screenplay and video-history endpoints

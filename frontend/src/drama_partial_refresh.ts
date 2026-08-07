@@ -1,5 +1,8 @@
 import * as core from './drama_core_ui.js';
+import { syncDramaCoverUi } from './drama_cover_ui.js';
+import { syncDramaDecompositionBanner } from './drama_decomposition_banner_ui.js';
 import { activeDramaProject, dramaViewState, setActiveDramaProject } from './drama_state.js';
+import { dramaAssetImageIsGenerating } from './drama_asset_image_state_ui.js';
 import type { ApiProject, GenerationTask } from './models.js';
 
 type PartialRefreshRuntime = {
@@ -18,7 +21,7 @@ function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
   tasks.forEach(task => merged.set(task.id, { ...merged.get(task.id), ...task }));
   project.tasks = [...merged.values()];
   tasks.forEach(task => {
-    if (task.type === 'asset_image' || task.type === 'placeholder_image') {
+    if (task.type === 'asset_image' || task.type === 'placeholder_image' || task.type === 'cover_image') {
       const asset = project.assets?.find(item => item.id === task.resource_id);
       if (asset) asset.status = task.status;
     }
@@ -33,6 +36,18 @@ function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
   });
   setActiveDramaProject(project);
   core.applyDramaGenerationLoading(project);
+  syncDramaPromptReferenceImages(project);
+  syncDramaCoverUi(project);
+  syncDramaDecompositionBanner(project);
+}
+
+/** Replace rich-prompt thumbnails only when their referenced asset crosses a loading boundary. */
+function syncDramaPromptReferenceImages(project: ApiProject) {
+  const editor = document.querySelector<HTMLElement>('.drama-rich-prompt-editor');
+  if (!editor) return;
+  const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
+  const changed = [...editor.querySelectorAll<HTMLElement>('[data-drama-prompt-reference]')].some(chip => Boolean(chip.querySelector('.drama-image-loading')) !== dramaAssetImageIsGenerating(assets.get(chip.dataset.assetId || ''), project.tasks));
+  if (changed) core.renderDramaPromptNodes(editor, project, core.readDramaPromptNodes(editor));
 }
 
 function refreshShotList(project: ApiProject) {
@@ -62,6 +77,24 @@ function resetRichPromptEditor(project: ApiProject) {
 }
 
 function bindVideoHistory(project: ApiProject) {
+  const history = document.querySelector<HTMLElement>('.drama-video-history');
+  const items = history ? [...history.querySelectorAll<HTMLButtonElement>('.drama-history-item')] : [];
+  if (history && items.length) {
+    const grid = document.createElement('div');
+    grid.className = 'drama-history-grid';
+    items.forEach(item => {
+      const icon = item.querySelector<HTMLElement>(':scope > span');
+      const url = item.dataset.dramaHistoryUrl;
+      if (icon && !icon.classList.contains('drama-history-thumb')) {
+        icon.className = 'drama-history-thumb';
+        icon.innerHTML = url ? `<video src="${url}" muted playsinline preload="metadata" aria-hidden="true"></video><i>▶</i>` : '<i>◌</i>';
+      }
+      const text = item.querySelector<HTMLElement>(':scope > div');
+      if (text) { text.className = 'drama-history-meta'; text.insertAdjacentHTML('beforeend', `<em>${url ? '点击预览' : '生成中'}</em>`); }
+      grid.append(item);
+    });
+    history.querySelector('.section-title')?.after(grid);
+  }
   document.querySelectorAll<HTMLElement>('.drama-video-panel [data-drama-history-url]').forEach(element => {
     element.addEventListener('click', () => {
       dramaViewState.videoUrl = element.dataset.dramaHistoryUrl || null;
@@ -78,6 +111,8 @@ function refreshVideoPanel(project: ApiProject) {
   if (next && current) {
     current.replaceWith(next);
     bindVideoHistory(project);
+    const shot = core.dramaSelectedShot(project);
+    if (shot) core.enhanceDramaShotEditor(project, shot);
   }
 }
 
@@ -87,6 +122,7 @@ async function refreshAssets(project: ApiProject) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   project.assets = await response.json() as ApiProject['assets'];
   setActiveDramaProject(project);
+  syncDramaCoverUi(project);
   core.syncDramaShotReferencePanel(project);
   const backdrop = document.querySelector<HTMLElement>('.drama-sheet-backdrop');
   if (backdrop && dramaViewState.assetPanel) {
@@ -116,7 +152,7 @@ export async function applyDramaTaskUpdate(tasks: GenerationTask[], completed: G
     await runtime.loadFullDetail(project.id);
     return;
   }
-  const assetChanged = completed.some(task => ['asset_image', 'asset_variant_image', 'placeholder_image'].includes(task.type));
+  const assetChanged = completed.some(task => ['asset_image', 'asset_variant_image', 'placeholder_image', 'cover_image'].includes(task.type));
   const shotChanged = completed.some(task => ['shot_prompt', 'shot_quality', 'shot_video'].includes(task.type));
   if (assetChanged) await refreshAssets(project);
   if (shotChanged) await refreshShots(project);

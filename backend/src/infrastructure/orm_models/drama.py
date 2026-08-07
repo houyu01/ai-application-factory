@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Integer, String, Text
+from sqlalchemy import Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import ORMBase
@@ -19,12 +19,17 @@ class ShortDrama(ORMBase):
     id: Mapped[str] = mapped_column(String(100), primary_key=True, comment="Stable project id; read by every project API and never changed.")
     name: Mapped[str] = mapped_column(String(200), comment="Project display name; changed when the user renames a drama.")
     script: Mapped[str] = mapped_column(Text, comment="Original script; read by decomposition and prompt generation, changed only by project editing.")
+    expanded_script: Mapped[str] = mapped_column(Text, default="", server_default="", comment="Long-form expanded screenplay; written before decomposition, read by planning and the screenplay dialog, and never replaces the original script.")
     ratio: Mapped[str] = mapped_column(String(40), comment="Video aspect ratio; read by image/video generation and changed in global parameters.")
     style: Mapped[str] = mapped_column(String(120), comment="Visual style; read by every prompt and changed in global parameters.")
     theme: Mapped[str] = mapped_column(String(120), comment="Narrative theme; read by prompt planning and changed in global parameters.")
     language_model: Mapped[str] = mapped_column(String(200), comment="Selected text model; read when LLM tasks start and changed in project settings.")
     multimodal_model: Mapped[str] = mapped_column(String(200), comment="Selected image model; read by asset image tasks and changed in project settings.")
     video_model: Mapped[str] = mapped_column(String(200), default="doubao-seedance-2.0", server_default="doubao-seedance-2.0", comment="Selected video model; read by shot video tasks and changed in project settings.")
+    episode_count: Mapped[int] = mapped_column(Integer, default=50, server_default="50", comment="Requested episode count; read by screenplay expansion and storyboard planning, set only when the project is created.")
+    enable_web_search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", comment="Whether screenplay expansion may use web search; read when bootstrap expansion starts and set at project creation.")
+    expanded_script_min_chars: Mapped[int] = mapped_column(Integer, default=50_000, server_default="50000", comment="Minimum characters required for the expanded screenplay; read by bootstrap expansion and set when the project is created.")
+    expanded_script_max_chars: Mapped[int] = mapped_column(Integer, default=100_000, server_default="100000", comment="Hard character ceiling for the expanded screenplay; read by bootstrap expansion and set when the project is created.")
     resolution: Mapped[str] = mapped_column(String(40), default="720p", server_default="720p", comment="Output resolution; read by media generation and changed in global parameters.")
     video_public_prompt: Mapped[str] = mapped_column(Text, default="", server_default="", comment="Project-wide video prompt; read before every shot video prompt and edited by the user.")
     asset_public_prompts_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", comment="Per-asset-type public prompts; read for asset generation and changed from the asset prompt panel.")
@@ -38,14 +43,14 @@ class ShortDrama(ORMBase):
 
 
 class DramaAsset(ORMBase):
-    """A character, scene, prop, or placeholder image asset belonging to a drama."""
+    """A reusable drama image, uploaded reference, or generated cover asset."""
 
     __tablename__ = "drama_assets"
     __table_args__ = {"comment": "Reusable visual and voice assets referenced by drama shots."}
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True, comment="Stable asset id; embedded in rich prompts and never changed.")
     drama_id: Mapped[str] = mapped_column(String(100), index=True, comment="Owning drama id; used to scope every asset query and never changed.")
-    type: Mapped[str] = mapped_column(String(40), comment="Asset kind: character, scene, prop, or placeholder; changed only by migration-free manual edits.")
+    type: Mapped[str] = mapped_column(String(40), comment="Asset kind such as character, scene, prop, placeholder, cover_reference, or cover; set at creation and read by editors and workers.")
     name: Mapped[str] = mapped_column(String(200), comment="Human-readable asset name; changed when the user edits an asset.")
     prompt: Mapped[str] = mapped_column(Text, comment="Asset image prompt; read by image generation and changed by prompt editing.")
     voice_id: Mapped[str | None] = mapped_column(String(100), nullable=True, comment="Optional voice preset id for character dialogue; changed in character settings.")
@@ -54,7 +59,7 @@ class DramaAsset(ORMBase):
     source_type: Mapped[str] = mapped_column(String(40), default="generated", server_default="generated", comment="Image origin such as generated or uploaded; changed with asset replacement.")
     image_history_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", comment="Historical image URLs and timestamps; read by image history and appended after each image change.")
     variants_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", comment="Alternative asset forms; read by variant management and changed when variants are edited.")
-    metadata_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", comment="Placeholder/layout/provider metadata; read by specialized generation tasks and changed by those tasks.")
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", comment="Layout, provider, or cover reference/count metadata; read by specialized generation tasks and set when those workflows start.")
     status: Mapped[str] = mapped_column(String(40), comment="Asset task status; changed when image generation or upload starts and finishes.")
     created_at: Mapped[str] = mapped_column(String(40), comment="Asset creation timestamp; read for ordering and never changed.")
     updated_at: Mapped[str] = mapped_column(String(40), comment="Last asset update timestamp; changed by asset edits and image tasks.")

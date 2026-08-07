@@ -5,6 +5,41 @@ def _shots(plan: dict) -> list[dict]:
     return [shot for episode in plan["episodes"] for shot in episode["shots"]]
 
 
+class _RecordingDramaAgent:
+    def __init__(self) -> None:
+        self.completion_kwargs: dict = {}
+        self.skill_calls: list[tuple[str, dict]] = []
+
+    def execute_skill(self, name: str, arguments: dict) -> dict:
+        self.skill_calls.append((name, arguments))
+        return {"skill": name, "arguments": arguments}
+
+    def completion(self, messages: list[dict], **kwargs) -> str:
+        self.completion_kwargs = kwargs
+        return (
+            '{"episodes":[{"name":"第1集","shots":['
+            '{"title":"开场","original_text":"林岩走进旧城。","prompt":"旧城中景"},'
+            '{"title":"发现","original_text":"他发现一封密信。","prompt":"密信特写"}'
+            ']}],"assets":[]}'
+        )
+
+
+def test_model_plan_enables_web_search_for_expansion_and_decomposition(monkeypatch):
+    agent = _RecordingDramaAgent()
+    planner = ScriptPlanner()
+    monkeypatch.setattr(planner, "_agent", lambda runtime, script: agent)
+
+    planner.plan(
+        "林岩走进旧城。他发现一封密信。",
+        {"model": "doubao-seed", "theme": "古风仙侠"},
+    )
+
+    assert agent.completion_kwargs["tools"] == [{"type": "web_search"}]
+    asset_calls = [arguments for name, arguments in agent.skill_calls if name == "asset_prompt_generator"]
+    assert len(asset_calls) == 3
+    assert all(arguments["theme"] == "古风仙侠" for arguments in asset_calls)
+
+
 def test_fallback_plan_splits_long_script_into_distinct_story_beats():
     script = (
         "男主在山村小屋醒来，发现门外留下了一封没有署名的信。"
@@ -13,7 +48,9 @@ def test_fallback_plan_splits_long_script_into_distinct_story_beats():
         "男主带着钥匙进入密道，终于看见了被隐藏多年的真相。"
     )
 
-    plan = ScriptPlanner._fallback_plan(script, {"style": "真人风格", "ratio": "9:16"})
+    plan = ScriptPlanner._fallback_plan(
+        script, {"style": "真人风格", "theme": "古风仙侠", "ratio": "9:16"}
+    )
     shots = _shots(plan)
 
     assert len(shots) >= 2
@@ -58,7 +95,9 @@ def test_fallback_asset_catalog_has_multiple_semantic_assets_and_visual_prompts(
         "他在旧城遇见师姐，带着钥匙进入密道，最终揭露正道魁首的阴谋。"
     )
 
-    plan = ScriptPlanner._fallback_plan(script, {"style": "真人风格", "ratio": "9:16"})
+    plan = ScriptPlanner._fallback_plan(
+        script, {"style": "真人风格", "theme": "古风仙侠", "ratio": "9:16"}
+    )
     assets = plan["assets"]
 
     assert all(sum(asset["type"] == asset_type for asset in assets) >= 2 for asset_type in ("character", "scene", "prop"))
@@ -67,6 +106,7 @@ def test_fallback_asset_catalog_has_multiple_semantic_assets_and_visual_prompts(
     character = next(asset for asset in assets if asset["type"] == "character")
     scene = next(asset for asset in assets if asset["type"] == "scene")
     prop = next(asset for asset in assets if asset["type"] == "prop")
+    assert all("叙述背景主题：古风仙侠" in asset["prompt"] for asset in assets)
     assert all(marker in character["prompt"] for marker in ("脸型", "肤色", "头发", "身型", "衣料"))
     assert "性格具体表现为" in character["prompt"]
     assert all(marker in character["prompt"] for marker in ("习惯", "遇到", "对信任的人"))

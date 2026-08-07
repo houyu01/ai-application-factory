@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from .agents.drama_agent import DramaAgent
+from .client.openai_chat_client import OpenAIChatClient
 from .client.openai_client import OpenAICLient, OpenAIClientBaseOptions
 
 
@@ -35,7 +36,7 @@ class ScriptPlannerDecompositionMixin:
             "建议每个分镜 20～80 个字、对应约 3～8 秒视频，并且能独立生成视频、又能和相邻镜头衔接。"
             "original_text 必须是当前分镜对应的短文本片段，不能复制完整剧本，不能让多个分镜重复同一段；"
             "需要把完整剧本中的事件按顺序分配到各个分镜，保证每个片段只出现一次。"
-            "素材目录是独立的视觉设定，不是剧本原文摘抄。每种素材至少生成 2 个，"
+            "素材目录是独立的视觉设定，不是剧本原文摘抄。每种素材至少生成 5 个，"
             "角色、场景、道具总数不足时，要从剧情中的关系、地点、线索和行动合理扩展，"
             "但不能使用‘主要角色’、‘主要场景’、‘关键道具’等泛化名称。\n"
             "角色 name 必须直接使用简短、真实、方便观众记忆的人名，优先使用 2～4 个字的人名，"
@@ -49,6 +50,9 @@ class ScriptPlannerDecompositionMixin:
             "场景中物品状态、整体氛围、人物与文字限制’组织，明确写出无人物、无背景文字等约束。\n"
             "道具 name 必须有真实叙事含义，prompt 必须写道具颜色、材质、细节、磨损、装饰和表面文字；"
             "不能把完整剧本或同一段故事复制到每个素材 prompt。\n"
+            f"所有角色、场景、道具 prompt 第一行必须写‘叙述背景主题：{runtime.get('theme', '都市')}’，"
+            "并严格约束服饰、建筑陈设、交通、照明、道具形制和制作工艺符合该背景的时代与技术水平；"
+            "除非剧本明确包含穿越或跨时代设定，否则不得混入跨时代元素。\n"
             "素材只提取剧本真实出现且会复用的角色、场景、道具，并为后续图片生成补齐视觉细节。\n"
             f"配置：风格={runtime.get('style', '真人风格')}，题材={runtime.get('theme', '都市')}，"
             f"画幅={runtime.get('ratio', '9:16')}，分辨率={runtime.get('resolution', '720p')}，"
@@ -71,13 +75,13 @@ class ScriptPlannerDecompositionMixin:
         api_key = runtime.get("api_key") or os.getenv("OPENAI_API_KEY")
         if not api_key:
             return None
-        client = OpenAICLient(
-            OpenAIClientBaseOptions(
-                api_key=api_key,
-                base_url=runtime.get("endpoint") or runtime.get("base_url") or os.getenv("OPENAI_BASE_URL"),
-                model=runtime.get("model") or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            )
+        options = OpenAIClientBaseOptions(
+            api_key=api_key,
+            base_url=runtime.get("endpoint") or runtime.get("base_url") or os.getenv("OPENAI_BASE_URL"),
+            model=runtime.get("model") or os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         )
+        provider = str(runtime.get("provider") or "ark").lower()
+        client = OpenAIChatClient(options) if provider in {"dashscope", "tencent"} else OpenAICLient(options)
         return DramaAgent(llm_client=client, context={"drama": context_value})
 
     @staticmethod
@@ -270,6 +274,7 @@ class ScriptPlannerDecompositionMixin:
 
         text = _script_planner()._clean_script(script)
         style = str(runtime.get("style") or "真人风格")
+        theme = str(runtime.get("theme") or "都市")
         characters: list[tuple[str, str]] = []
         if _script_planner()._contains_any(text, ("男主", "主人公", "少年", "男孩")):
             characters.append(("林岩", "青年男性故事主人公，出身偏僻山村，背负故乡旧案并沿线索追查真相。"))
@@ -381,7 +386,7 @@ class ScriptPlannerDecompositionMixin:
                     "id": f"char_{index:03d}",
                     "type": "character",
                     "name": name,
-                    "prompt": _script_planner()._character_prompt(name, identity, style, index),
+                    "prompt": _script_planner()._character_prompt(name, identity, style, index, theme),
                 }
             )
         for index, (name, origin, appearance, objects, atmosphere) in enumerate(scenes, start=1):
@@ -390,7 +395,9 @@ class ScriptPlannerDecompositionMixin:
                     "id": f"scene_{index:03d}",
                     "type": "scene",
                     "name": name,
-                    "prompt": _script_planner()._scene_prompt(name, origin, appearance, objects, atmosphere),
+                    "prompt": _script_planner()._scene_prompt(
+                        name, origin, appearance, objects, atmosphere, theme
+                    ),
                 }
             )
         for index, (name, detail, purpose) in enumerate(props, start=1):
@@ -399,7 +406,10 @@ class ScriptPlannerDecompositionMixin:
                     "id": f"prop_{index:03d}",
                     "type": "prop",
                     "name": name,
-                    "prompt": f"{name}\n颜色、材质与细节：{detail}\n故事作用：{purpose}",
+                    "prompt": (
+                        f"{_script_planner()._asset_theme_constraint(theme, 'prop')}\n"
+                        f"{name}\n颜色、材质与细节：{detail}\n故事作用：{purpose}"
+                    ),
                 }
             )
         return assets

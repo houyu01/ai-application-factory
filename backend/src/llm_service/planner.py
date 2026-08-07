@@ -13,12 +13,24 @@ from .client.openai_client import OpenAICLient, OpenAIClientBaseOptions
 
 from .planner_prompt_mixin import ScriptPlannerPromptMixin
 from .planner_decomposition_mixin import ScriptPlannerDecompositionMixin
+from .planner_expansion_mixin import ScriptPlannerExpansionMixin
+from .planner_expansion_request_mixin import ScriptPlannerExpansionRequestMixin
+from .planner_long_form_mixin import ScriptPlannerLongFormMixin
 from .planner_repair_mixin import ScriptPlannerRepairMixin
 from .planner_utils_mixin import ScriptPlannerUtilsMixin
 
-class ScriptPlanner(ScriptPlannerPromptMixin, ScriptPlannerDecompositionMixin, ScriptPlannerRepairMixin, ScriptPlannerUtilsMixin):
-    """Public compatibility facade for the split orchestration service."""
+WEB_SEARCH_TOOLS: list[dict[str, str]] = [{"type": "web_search"}]
 
+
+class ScriptPlanner(
+    ScriptPlannerPromptMixin,
+    ScriptPlannerLongFormMixin,
+    ScriptPlannerExpansionMixin,
+    ScriptPlannerExpansionRequestMixin,
+    ScriptPlannerDecompositionMixin,
+    ScriptPlannerRepairMixin,
+    ScriptPlannerUtilsMixin,
+):
     """Plan drama structure with an OpenAI-compatible model when configured.
 
     The planner deliberately keeps a local fallback. It makes the UI and
@@ -35,6 +47,10 @@ class ScriptPlanner(ScriptPlannerPromptMixin, ScriptPlannerDecompositionMixin, S
     def plan(self, script: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
         runtime = {**self.options, **(options or {})}
         agent = self._agent(runtime, script)
+        if self._is_long_form_screenplay(script, runtime):
+            if agent is None:
+                return self._fallback_long_form_plan(script, runtime)
+            return self._plan_long_form(script, runtime, agent)
         if agent is None:
             return self._fallback_plan(script, runtime)
 
@@ -57,6 +73,7 @@ class ScriptPlanner(ScriptPlannerPromptMixin, ScriptPlannerDecompositionMixin, S
                     "name": "短剧素材目录",
                     "story_context": script,
                     "style": runtime.get("style", "真人风格"),
+                    "theme": runtime.get("theme", "都市"),
                 },
             )
             for asset_type in ("character", "scene", "prop")
@@ -71,6 +88,7 @@ class ScriptPlanner(ScriptPlannerPromptMixin, ScriptPlannerDecompositionMixin, S
                 }
             ],
             model=runtime.get("model"),
+            tools=WEB_SEARCH_TOOLS,
         )
         parsed = self._parse_json(response)
         return self._normalize_plan(parsed, script, runtime)

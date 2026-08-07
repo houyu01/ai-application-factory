@@ -40,19 +40,30 @@ class ArkClient:
         self.query_url = (query_url or f"{self.base_url}/contents/generations/tasks/{{id}}").strip()
         self._opener = opener
 
-    def generate_image(self, prompt: str) -> dict[str, Any]:
+    def generate_image(
+        self,
+        prompt: str,
+        *,
+        reference_images: list[str] | None = None,
+        first_frame: str | None = None,
+        last_frame: str | None = None,
+        size: str = "2K",
+    ) -> dict[str, Any]:
         """Generate an image and return either its URL or decoded bytes."""
 
+        request_payload: dict[str, Any] = {
+            "model": self.model,
+            "prompt": prompt,
+            "size": size,
+            "sequential_image_generation": "disabled",
+            "response_format": "url",
+            "watermark": False,
+        }
+        if reference_images:
+            request_payload["image"] = reference_images
         payload = self._request_json(
             "/images/generations",
-            {
-                "model": self.model,
-                "prompt": prompt,
-                "size": "2K",
-                "sequential_image_generation": "disabled",
-                "response_format": "url",
-                "watermark": False,
-            },
+            request_payload,
         )
         item = self._first_data_item(payload)
         url = item.get("url")
@@ -75,6 +86,8 @@ class ArkClient:
         resolution: str = "720p",
         seconds: int = 8,
         reference_images: list[str] | None = None,
+        generate_audio: bool = True,
+        watermark: bool = False,
         poll_interval: float | None = None,
         timeout: float | None = None,
     ) -> dict[str, Any]:
@@ -86,6 +99,8 @@ class ArkClient:
             resolution=resolution,
             seconds=seconds,
             reference_images=reference_images,
+            generate_audio=generate_audio,
+            watermark=watermark,
         )
         task_id = created["provider_task_id"]
 
@@ -128,17 +143,30 @@ class ArkClient:
         resolution: str = "720p",
         seconds: int = 8,
         reference_images: list[str] | None = None,
+        generate_audio: bool = True,
+        watermark: bool = False,
     ) -> dict[str, Any]:
         """Create a provider task without waiting for completion."""
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for image_url in reference_images or []:
-            content.append({"type": "image_url", "image_url": {"url": image_url}})
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": str(image_url)},
+                    # Ark requires media intent for Seedance reference inputs.
+                    # Without this field the task API rejects image content with
+                    # ``role must be specified for image contents``.
+                    "role": "reference_image",
+                }
+            )
         generation_payload: dict[str, Any] = {
             "model": self.model,
             "content": content,
+            "generate_audio": bool(generate_audio),
             "ratio": ratio,
             "duration": seconds,
+            "watermark": bool(watermark),
         }
         if resolution:
             generation_payload["resolution"] = resolution
@@ -157,6 +185,8 @@ class ArkClient:
         return self._request_json_url(self._query_task_url(task_id))
 
     def cancel_video_task(self, task_id: str) -> dict[str, Any]:
+        """Call Ark DeleteContentsGenerationsTasks for one provider task id."""
+
         return self._request_json_url(self._query_task_url(task_id), method="DELETE")
 
     def _query_task_url(self, task_id: str) -> str:

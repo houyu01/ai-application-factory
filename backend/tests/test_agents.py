@@ -58,6 +58,19 @@ def test_base_agent_completion_exposes_loaded_skills_as_tools():
     assert request["tool_executor"] == agent._execute_skill
 
 
+def test_base_agent_completion_merges_provider_tools_with_skills():
+    llm = FakeLLMClient()
+    agent = DramaAgent(llm_client=llm)
+
+    agent.completion(
+        [{"role": "user", "content": "扩写并拆分剧本"}],
+        tools=[{"type": "web_search"}],
+    )
+
+    _, request = llm.completion_request
+    assert request["tools"] == [*agent.skill_tools, {"type": "web_search"}]
+
+
 def test_base_agent_stream_delegates_to_llm_client():
     llm = FakeLLMClient()
     agent = DramaAgent(llm_client=llm)

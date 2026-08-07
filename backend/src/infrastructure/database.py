@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -35,6 +36,7 @@ class Database:
             connect_args={"check_same_thread": False, "timeout": 30},
             future=True,
         )
+        self.task_claim_lock = threading.Lock()
         self.session_factory = sessionmaker(bind=self.engine, expire_on_commit=False, class_=Session)
         ORMBase.metadata.create_all(self.engine)
 
