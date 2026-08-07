@@ -17,6 +17,14 @@ let polling = false;
 let projectId: string | null = null;
 let cursor = '';
 
+function activeTaskCursor(project: ApiProject) {
+  const createdAt = (project.tasks || [])
+    .filter(task => task.status === '生成中' && task.created_at)
+    .map(task => task.created_at as string)
+    .sort();
+  return createdAt[0] || new Date(Date.now() - 5 * 60_000).toISOString();
+}
+
 export function configureDramaTaskPolling(value: DramaTaskPollingRuntime) {
   runtime = value;
 }
@@ -33,13 +41,14 @@ export function scheduleDramaTaskRefresh(project: ApiProject) {
   if (projectId !== project.id) {
     stopDramaTaskPolling();
     projectId = project.id;
-    cursor = '';
+    cursor = activeTaskCursor(project);
   }
   const hasActiveTask = (project.tasks || []).some(task => task.status === '生成中');
   if (!hasActiveTask) {
     stopDramaTaskPolling();
     return;
   }
+  if (!cursor) cursor = activeTaskCursor(project);
   if (timer === null && !polling) {
     timer = window.setTimeout(() => {
       timer = null;

@@ -12,6 +12,7 @@ class GenerationStatus(str, Enum):
     GENERATING = "生成中"
     SUCCEEDED = "生成成功"
     FAILED = "生成失败"
+    CANCELLED = "已取消"
 
 
 class DramaShotConstraints(BaseModel):
@@ -31,10 +32,22 @@ class ProjectCreate(BaseModel):
     language_model: str = "doubao-seed"
     multimodal_model: str = "doubao-seeddream"
     video_model: str = "doubao-seedance-2.0"
+    episode_count: int = Field(default=50, ge=2, le=100)
+    enable_web_search: bool = False
+    expanded_script_min_chars: int = Field(default=50_000, ge=50_000, le=1_000_000)
+    expanded_script_max_chars: int = Field(default=100_000, ge=50_000, le=1_000_000)
     resolution: str = "720p"
     shot_constraints: DramaShotConstraints = Field(default_factory=DramaShotConstraints)
     video_public_prompt: str = ""
     asset_public_prompts: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_expanded_script_range(self) -> "ProjectCreate":
+        """Keep the project expansion range valid before a durable task is created."""
+
+        if self.expanded_script_min_chars > self.expanded_script_max_chars:
+            raise ValueError("扩写字数最小值不能大于最大值")
+        return self
 
 
 class ModelSelectionUpdate(BaseModel):
@@ -46,7 +59,7 @@ class ModelSelectionUpdate(BaseModel):
 
 
 class ProjectParametersUpdate(BaseModel):
-    """Parameters applied to every current and future shot in a project."""
+    """Project-level defaults used by explicit future generation actions."""
 
     ratio: str | None = Field(default=None, min_length=1, max_length=40)
     style: str | None = Field(default=None, min_length=1, max_length=120)
@@ -54,6 +67,19 @@ class ProjectParametersUpdate(BaseModel):
     resolution: str | None = Field(default=None, min_length=1, max_length=40)
     shot_constraints: DramaShotConstraints | None = None
     video_public_prompt: str | None = None
+
+
+class ProjectNameUpdate(BaseModel):
+    """Editable title submitted from the short-drama detail toolbar."""
+
+    name: str = Field(min_length=1, max_length=200)
+
+
+class DramaScriptUpdate(BaseModel):
+    """Original and expanded screenplay text saved from the project script dialog."""
+
+    script: str = Field(min_length=10)
+    expanded_script: str = ""
 
 
 class GamePlatform(str, Enum):
@@ -156,7 +182,7 @@ class DramaAssetUpdate(BaseModel):
 
 class DramaAssetCreate(BaseModel):
     """Asset fields submitted when the user manually adds a drama resource."""
-    type: Literal["character", "scene", "prop", "placeholder"]
+    type: Literal["character", "scene", "prop", "placeholder", "cover_reference"]
     name: str = Field(min_length=1, max_length=200)
     prompt: str = ""
     voice_id: str | None = Field(default=None, max_length=200)
@@ -215,13 +241,15 @@ class DramaPlaceholderGenerationRequest(DramaPlaceholderLayoutUpdate):
 
 
 class DramaShotUpdate(BaseModel):
-    """Shot fields changed when the editor saves text, prompt, or video duration."""
+    """Shot fields changed when users edit content, prompt, duration, or selected references."""
     title: str | None = Field(default=None, min_length=1, max_length=200)
     original_text: str | None = None
     prompt: str | None = None
     prompt_rich: list[dict[str, Any]] | None = None
+    reference_asset_ids: list[str] | None = Field(default=None, max_length=200, description="Asset IDs selected for this shot; changed when references are added or removed.")
     duration_seconds: int | None = Field(default=None, ge=3, le=15)
     prompt_template_version: str | None = Field(default=None, pattern=r"^v[0-9]+$")
+    first_last_frames: dict[str, Any] | None = Field(default=None, description="Optional first/last frame references used to connect shots within the same episode.")
 
 
 class DramaShotCreate(BaseModel):

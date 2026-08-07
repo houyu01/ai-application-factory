@@ -46,16 +46,19 @@ class BaseAgent(ABC):
         messages: list[Mapping[str, Any]],
         *,
         model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
         max_tool_rounds: int = 8,
+        timeout: float | None = None,
     ) -> str:
-        """Call the model with all discovered skills exposed as tools."""
+        """Call the model with discovered skills and optional provider tools."""
 
         return self.llm_client.completion(
             self._with_agent_context(messages),
             model=model,
-            tools=self.skill_tools,
+            tools=self._merge_tools(tools),
             tool_executor=self._execute_skill,
             max_tool_rounds=max_tool_rounds,
+            timeout=timeout,
         )
 
     async def completion_stream(
@@ -63,22 +66,32 @@ class BaseAgent(ABC):
         messages: list[Mapping[str, Any]],
         *,
         model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
         max_tool_rounds: int = 8,
+        timeout: float | None = None,
     ) -> AsyncIterator[str]:
-        """Stream model text while allowing it to invoke discovered skills."""
+        """Stream text with discovered skills and optional provider tools."""
 
         async for chunk in self.llm_client.completion_stream(
             self._with_agent_context(messages),
             model=model,
-            tools=self.skill_tools,
+            tools=self._merge_tools(tools),
             tool_executor=self._execute_skill,
             max_tool_rounds=max_tool_rounds,
+            timeout=timeout,
         ):
             yield chunk
 
     @property
     def skill_tools(self) -> list[dict[str, Any]]:
         return [skill.tool_definition() for skill in self.skills.values()]
+
+    def _merge_tools(
+        self, provider_tools: list[dict[str, Any]] | None
+    ) -> list[dict[str, Any]]:
+        """Combine local function skills with Responses API built-in tools."""
+
+        return [*self.skill_tools, *[dict(tool) for tool in (provider_tools or [])]]
 
     def _execute_skill(
         self,

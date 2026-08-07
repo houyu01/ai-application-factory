@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
+from ..application.task_worker import durable_task_worker
 from ..domain.models import StorageConfig, VoicePreset
 from .router_common import api_router, task_service
 
@@ -18,8 +19,23 @@ class ModelConfig(BaseModel):
     endpoint: str = ""
     create_url: str = ""
     query_url: str = ""
+    provider: str = Field(default="ark", pattern="^(ark|dashscope|tencent)$")
+    region: str = ""
     api_key: str = ""
+    secret_id: str = ""
+    secret_key: str = ""
+    app_id: str = ""
+    resource_id: str = ""
+    voice: str = ""
     video_model: str | None = None
+    generation_concurrency: int | None = Field(default=None, ge=1, le=8)
+
+
+class ModelOptionsUpdate(BaseModel):
+    """Selectable model names edited directly inside one settings dropdown."""
+
+    models: list[str] = Field(default_factory=list, max_length=100)
+    model: str = ""
 
 
 class PromptTemplateCreate(BaseModel):
@@ -57,7 +73,11 @@ def save_model_config(config: ModelConfig):
     """The settings page calls this when a provider endpoint or model list is saved."""
 
     try:
-        return task_service.save_model_config(config.model_dump())
+        saved = task_service.save_model_config(config.model_dump())
+        durable_task_worker.set_queue_concurrency(
+            config.kind, saved["generation_concurrency"]
+        )
+        return saved
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -67,6 +87,16 @@ def get_model_configs():
     """The settings page calls this when it loads configured providers and model choices."""
 
     return task_service.get_model_configs()
+
+
+@api_router.put("/settings/models/{kind}/options")
+def save_model_options(kind: str, payload: ModelOptionsUpdate):
+    """The settings selector calls this immediately after adding or deleting an option."""
+
+    try:
+        return task_service.save_model_options(kind, payload.models, payload.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @api_router.get("/settings/models/{kind}/api-key")

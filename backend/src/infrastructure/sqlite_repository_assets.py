@@ -13,11 +13,12 @@ from .repository_common import _json_dump, _json_load, utc_now
 
 
 class DramaRepositoryAssetMixin:
-    """Manage character, scene, prop, and placeholder assets.
+    """Manage reusable visual assets, uploaded references, and cover outputs.
 
-    The asset drawer and reference picker call this mixin when users add,
-    edit, upload, generate, or select visual assets. ORM transactions keep
-    image history, variants, voice settings, and task-visible status together.
+    Asset drawers, shot reference pickers, and the cover dialog call this mixin
+    when users add, edit, upload, generate, or select visual assets. ORM
+    transactions keep image history, variants, voice settings, cover metadata,
+    and task-visible status together.
     """
 
     def _asset_model(self, session: Any, drama_id: str, asset_id: str) -> DramaAsset | None:

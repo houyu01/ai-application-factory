@@ -57,7 +57,24 @@ class ScriptPlannerUtilsMixin:
                 return {}
 
     @staticmethod
-    def _character_prompt(name: str, identity: str, style: str, index: int) -> str:
+    def _asset_theme_constraint(theme: Any, asset_type: str) -> str:
+        """Build the project-era constraint shared by every visual asset prompt."""
+
+        normalized_theme = re.sub(r"\s+", " ", str(theme or "都市")).strip() or "都市"
+        focus = {
+            "character": "角色身份、发型、妆容、服装与配饰",
+            "scene": "建筑、道路、室内陈设、照明、交通工具与环境细节",
+            "prop": "道具造型、材质、制作工艺、表面文字与实际功能",
+        }.get(asset_type, "全部视觉元素")
+        return (
+            f"叙述背景主题：{normalized_theme}。{focus}必须符合该主题对应的时代、地域、社会环境与技术水平；"
+            "除非剧本明确包含穿越或跨时代设定，否则禁止出现与背景主题不符的元素。"
+        )
+
+    @staticmethod
+    def _character_prompt(
+        name: str, identity: str, style: str, index: int, theme: str = "都市"
+    ) -> str:
         identity_context = f"{name} {identity}"
         story_context = _script_planner()._character_story_context(name, identity)
         personality = _script_planner()._character_personality(identity_context, index)
@@ -72,6 +89,7 @@ class ScriptPlannerUtilsMixin:
         body = "身形纤细挺拔，肩颈舒展，体态利落" if gender == "青年女性" else "身形挺拔匀称，肩背有长期修炼形成的力量感"
         cloth = "衣料是轻薄但有纹理的青灰色云纱，搭配耐行动的深色腰封" if gender == "青年女性" else "衣料是透气的云纱材质，穿着素色长衫和便于行动的深色护腕"
         return (
+            f"{_script_planner()._asset_theme_constraint(theme, 'character')}\n"
             f"身世、身份与性格：{story_context}；性格具体表现为：{personality}。负责推动故事中的关键行动，性格和人物关系保持前后一致。\n"
             f"年龄与外观：{gender}，脸型与五官：{face}；{complexion}；头发：{hair}；身型：{body}；"
             f"服装与衣料：{cloth}。整体按{style}呈现，保持固定脸部特征、发型、体态和服装连续性。"
@@ -83,9 +101,11 @@ class ScriptPlannerUtilsMixin:
 
     @staticmethod
     def _scene_prompt(
-        name: str, origin: str, appearance: str, objects: str, atmosphere: str
+        name: str, origin: str, appearance: str, objects: str, atmosphere: str,
+        theme: str = "都市",
     ) -> str:
         return (
+            f"{_script_planner()._asset_theme_constraint(theme, 'scene')}\n"
             f"{name}\n场景由来：{origin}\n外形与色调：{appearance}\n"
             f"场景中物品状态：{objects}\n整体氛围与人物文字限制：{atmosphere}\n"
             "保持空间结构清晰，适合作为短剧场景素材参考图。"

@@ -12,8 +12,9 @@ class AssetPromptGeneratorSkill(BaseSkill):
             "name": {"type": "string"},
             "story_context": {"type": "string"},
             "style": {"type": "string"},
+            "theme": {"type": "string", "description": "短剧的叙述背景主题及时代世界观"},
         },
-        "required": ["asset_type", "name", "story_context", "style"],
+        "required": ["asset_type", "name", "story_context", "style", "theme"],
         "additionalProperties": False,
     }
     instruction = """
@@ -25,5 +26,10 @@ class AssetPromptGeneratorSkill(BaseSkill):
 眉眼、发型、身型、服装和衣料等稳定视觉特征。场景名称必须有真实地点含义，提示词按场景由来、
 外形与色调、场景中物品状态、整体氛围、人物与背景文字限制组织。道具名称必须有真实叙事含义，
 提示词写颜色、材质、形状、纹理、细节、磨损、装饰和表面文字。只描述视觉事实，不输出图片 URL，
-不要使用“主要角色”“主要场景”“关键道具”等泛化名称。
+不要使用“主要角色”“主要场景”“关键道具”等泛化名称。每个素材 prompt 第一行必须原样写入
+“叙述背景主题：{theme}”，并让角色服饰与身份、场景建筑与陈设、道具造型与工艺符合该主题对应的
+时代、地域、社会环境和技术水平；除非剧本明确包含穿越或跨时代设定，否则禁止混入不属于该背景的元素。
+角色视觉提示词还必须要求生成一张完整的角色设定板：规整多格排版，第一排为正面/严格侧面/背面
+三视图，第二排为六个不同面部表情特写，第三排为四个不同的全身动作姿态；禁止左右二分构图，
+禁止只生成头像加单张全身像，所有格子必须保持同一张脸、发型、服装、体型和配饰，不要文字、水印或多余人物。
 """.strip()

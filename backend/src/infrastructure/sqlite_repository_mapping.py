@@ -19,9 +19,12 @@ from .repository_common import JSON_FIELDS, _json_dump, _json_load, _parse_datet
 class DramaRepositoryMappingMixin:
     """Owns the DramaRepositoryMapping persistence slice."""
 
+    DETAIL_EXPANDED_PREVIEW_LIMIT = 3_200
+
     @staticmethod
     def _drama_from_row(row: sqlite3.Row | Any) -> dict[str, Any]:
         drama = model_to_row(row)
+        drama.pop("expanded_script", None)
         for column, output_key in JSON_FIELDS.items():
             if column in drama:
                 default = {} if output_key in {"asset_public_prompts", "shot_constraints"} else []
@@ -55,6 +58,7 @@ class DramaRepositoryMappingMixin:
         shot["placeholder_placements"] = placements if isinstance(placements, list) else []
         structured = _json_load(shot.pop("structured_json", None), {})
         shot["structured"] = structured if isinstance(structured, dict) else {}
+        shot["first_last_frames"] = shot["structured"].get("first_last_frames", {})
         quality = _json_load(shot.pop("quality_json", None), {})
         shot["quality"] = quality if isinstance(quality, dict) else {}
         quality_issues = _json_load(shot.pop("quality_issues_json", None), [])
@@ -104,6 +108,55 @@ class DramaRepositoryMappingMixin:
         task["input_snapshot"] = _json_load(input_value, None)
         task["result"] = _json_load(result_value, None)
         return task
+
+    @staticmethod
+    def _detail_task_from_row(row: sqlite3.Row | Any) -> dict[str, Any]:
+        """Build the bounded task projection used by the project detail page.
+
+        The detail editor renders task progress and only reads ``shot_id``
+        and ``expanded_script_preview`` from task input. Full provider results
+        remain available to worker/repository flows but must not be shipped in
+        every initial project response.
+        """
+        task = DramaRepositoryMappingMixin._task_from_row(row)
+        input_snapshot = task.get("input_snapshot")
+        if isinstance(input_snapshot, dict):
+            detail_input = {
+                key: input_snapshot[key]
+                for key in ("shot_id", "expanded_script_preview")
+                if key in input_snapshot
+            }
+            preview = detail_input.get("expanded_script_preview")
+            if isinstance(preview, str):
+                detail_input["expanded_script_preview"] = (
+                    DramaRepositoryMappingMixin._detail_expanded_preview(preview)
+                )
+            task["input_snapshot"] = detail_input
+        else:
+            task["input_snapshot"] = None
+        # Bootstrap tasks are the sole exception: the project editor needs the
+        # two persisted screenplay lengths to render completion state after a
+        # refresh.  Do not expose the potentially huge episodes/assets payload.
+        if task.get("type") == "script_decomposition" and isinstance(task.get("result"), dict):
+            task["result"] = {
+                key: task["result"].get(key)
+                for key in ("original_script_length", "expanded_script_length")
+                if key in task["result"]
+            }
+        else:
+            task["result"] = None
+        return task
+
+    @staticmethod
+    def _detail_expanded_preview(value: str) -> str:
+        """Keep the task banner useful without returning a whole screenplay."""
+        limit = DramaRepositoryMappingMixin.DETAIL_EXPANDED_PREVIEW_LIMIT
+        if len(value) <= limit:
+            return value
+        head_length = 2_400
+        tail_length = limit - head_length
+        omitted = len(value) - limit
+        return f"{value[:head_length]}\n\n…（已省略 {omitted:,} 字）…\n\n{value[-tail_length:]}"
 
     @staticmethod
     def _shot_version_from_row(row: sqlite3.Row | Any) -> dict[str, Any]:

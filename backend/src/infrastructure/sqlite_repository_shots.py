@@ -171,7 +171,8 @@ class DramaRepositoryShotMixin:
                     structured: dict[str, Any] | None = None, quality: dict[str, Any] | None = None,
                     quality_status: str | None = None, quality_issues: list[dict[str, Any]] | None = None,
                     reference_asset_ids: list[str] | None = None, prompt_template_id: str | None = None,
-                    prompt_template_version: str | None = None, status: GenerationStatus | None = None) -> dict[str, Any]:
+                    prompt_template_version: str | None = None, first_last_frames: dict[str, Any] | None = None,
+                    status: GenerationStatus | None = None) -> dict[str, Any]:
         with self.database.session() as session:
             shot = session.get(DramaShot, shot_id)
             if shot is None or shot.drama_id != drama_id:
@@ -184,6 +185,10 @@ class DramaRepositoryShotMixin:
             if placeholder_scene_asset_id is not None: shot.placeholder_scene_asset_id = placeholder_scene_asset_id
             if placeholder_placements is not None: shot.placeholder_placements_json = _json_dump(placeholder_placements)
             if structured is not None: shot.structured_json = _json_dump(structured)
+            if first_last_frames is not None:
+                current_structured = _json_load(shot.structured_json, {})
+                current_structured["first_last_frames"] = first_last_frames
+                shot.structured_json = _json_dump(current_structured)
             if quality is not None: shot.quality_json = _json_dump(quality)
             if quality_status is not None: shot.quality_status = quality_status
             if quality_issues is not None: shot.quality_issues_json = _json_dump(quality_issues)
@@ -239,9 +244,14 @@ class DramaRepositoryShotMixin:
             if provider_task_id is not None: version.provider_task_id = provider_task_id
             if video_url is not None: version.video_url = video_url
             if error_message is not None: version.error_message = error_message
-            if status in (GenerationStatus.SUCCEEDED, GenerationStatus.FAILED):
+            if status in (
+                GenerationStatus.SUCCEEDED,
+                GenerationStatus.FAILED,
+                GenerationStatus.CANCELLED,
+            ):
                 version.completed_at = utc_now()
-                version.progress = 100
+                if status is not GenerationStatus.CANCELLED:
+                    version.progress = 100
             session.flush()
             return self._shot_version_from_row(version)
 
@@ -264,3 +274,93 @@ class DramaRepositoryShotMixin:
             drama.historical_videos_json = _json_dump(drama_history)
             drama.updated_at = timestamp
             return video
+
+    def delete_historical_video(
+        self, drama_id: str, shot_id: str, video_id: str
+    ) -> dict[str, Any]:
+        """Delete a video history record, its durable version, and its generation task.
+
+        The video-history delete action calls this after a user removes a past
+        success, failure, or in-progress run. Removing each related record keeps
+        the per-shot history and durable task queue free from orphaned data.
+        """
+
+        with self.database.session() as session:
+            shot = session.get(DramaShot, shot_id)
+            drama = session.get(ShortDrama, drama_id)
+            if shot is None or shot.drama_id != drama_id or drama is None:
+                raise KeyError(f"Shot not found: {shot_id}")
+            versions = session.scalars(select(DramaShotVersion).where(
+                DramaShotVersion.drama_id == drama_id,
+                DramaShotVersion.shot_id == shot_id,
+            )).all()
+            version = next((item for item in versions if video_id in {
+                str(item.id), str(item.task_id or "")
+            }), None)
+            shot_history = _json_load(shot.historical_videos_json, [])
+            shot_history = shot_history if isinstance(shot_history, list) else []
+            historical = next((item for item in shot_history if isinstance(item, dict) and video_id in {
+                str(item.get("id") or ""), str(item.get("task_id") or "")
+            }), None)
+            if version is None and historical is None:
+                raise KeyError(f"Historical video not found: {video_id}")
+            task_ids = {str(value) for value in (
+                version.task_id if version else None,
+                historical.get("task_id") if historical else None,
+                historical.get("id") if historical else None,
+            ) if value}
+            media_urls = {str(value) for value in (
+                version.video_url if version else None,
+                historical.get("url") if historical else None,
+            ) if value}
+
+            def matches_history(item: Any) -> bool:
+                if not isinstance(item, dict):
+                    return False
+                item_ids = {str(item.get("id") or ""), str(item.get("task_id") or "")}
+                return bool(item_ids.intersection(task_ids) or str(item.get("url") or "") in media_urls)
+
+            shot.historical_videos_json = _json_dump([
+                item for item in shot_history if not matches_history(item)
+            ])
+            drama_history = _json_load(drama.historical_videos_json, [])
+            drama_history = drama_history if isinstance(drama_history, list) else []
+            drama.historical_videos_json = _json_dump([
+                item for item in drama_history
+                if not (isinstance(item, dict) and str(item.get("shot_id") or "") == shot_id and matches_history(item))
+            ])
+            if version is not None:
+                session.delete(version)
+            provider_task_ids: list[str] = []
+            for task_id in task_ids:
+                task = session.get(GenerationTask, task_id)
+                if task is None:
+                    continue
+                if task.provider_task_id:
+                    provider_task_ids.append(task.provider_task_id)
+                session.delete(task)
+            timestamp = utc_now()
+            session.flush()
+            remaining_versions = session.scalars(select(DramaShotVersion).where(
+                DramaShotVersion.drama_id == drama_id,
+                DramaShotVersion.shot_id == shot_id,
+            )).all()
+            remaining_history = _json_load(shot.historical_videos_json, [])
+            remaining_statuses = {item.status for item in remaining_versions}
+            if GenerationStatus.GENERATING.value in remaining_statuses:
+                shot.status = GenerationStatus.GENERATING.value
+            elif GenerationStatus.SUCCEEDED.value in remaining_statuses or remaining_history:
+                shot.status = GenerationStatus.SUCCEEDED.value
+            elif GenerationStatus.FAILED.value in remaining_statuses:
+                shot.status = GenerationStatus.FAILED.value
+            else:
+                shot.status = GenerationStatus.NOT_GENERATED.value
+            shot.updated_at = timestamp
+            drama.updated_at = timestamp
+            self._sync_shot_snapshot(session, drama)
+            return {
+                "id": video_id,
+                "task_ids": sorted(task_ids),
+                "provider_task_ids": provider_task_ids,
+                "media_urls": sorted(media_urls),
+            }

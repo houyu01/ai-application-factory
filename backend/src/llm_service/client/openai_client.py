@@ -175,21 +175,17 @@ class OpenAICLient:
         tools: list[dict[str, Any]] | None = None,
         tool_executor: ToolExecutor | None = None,
         max_tool_rounds: int = 8,
+        timeout: float | None = None,
     ) -> str:
-        """Run a synchronous Responses API completion.
-
-        The previous implementation called ``AsyncOpenAI`` without ``await``
-        and then used an undefined ``response`` variable. This method now uses
-        the synchronous ``OpenAI`` client and supports the same tool loop as
-        the streaming method.
-        """
+        """Run a synchronous Responses API completion and execute tool calls."""
 
         self._validate_tool_rounds(max_tool_rounds)
         self.history.extend(self._copy_messages(messages))
         request_tools = self._normalize_tools(tools)
+        response_client = self._request_client(self.sync_client, timeout)
 
         for _ in range(max_tool_rounds + 1):
-            response = self.sync_client.responses.create(
+            response = response_client.responses.create(
                 model=model or self.model,
                 input=self.history,
                 **({"tools": request_tools} if request_tools else {}),
@@ -235,21 +231,17 @@ class OpenAICLient:
         tools: list[dict[str, Any]] | None = None,
         tool_executor: ToolExecutor | None = None,
         max_tool_rounds: int = 8,
+        timeout: float | None = None,
     ) -> AsyncIterator[str]:
-        """Stream generated text and transparently execute function calls.
-
-        Each yielded value is one ``response.output_text.delta`` string. The
-        Responses API sends function arguments as streaming events, so tool
-        calls are collected until ``response.output_item.done`` (or the
-        completed response fallback) before they are executed.
-        """
+        """Stream text and transparently execute function calls."""
 
         self._validate_tool_rounds(max_tool_rounds)
         self.history.extend(self._copy_messages(messages))
         request_tools = self._normalize_tools(tools)
+        response_client = self._request_client(self.client, timeout)
 
         for _ in range(max_tool_rounds + 1):
-            stream = await self.client.responses.create(
+            stream = await response_client.responses.create(
                 model=model or self.model,
                 input=self.history,
                 stream=True,
@@ -339,6 +331,10 @@ class OpenAICLient:
                 )
 
         raise RuntimeError("模型工具调用轮数超过限制")
+
+    @staticmethod
+    def _request_client(client: Any, timeout: float | None) -> Any:
+        return client.with_options(timeout=timeout) if timeout and hasattr(client, "with_options") else client
 
     @staticmethod
     def _read_options(

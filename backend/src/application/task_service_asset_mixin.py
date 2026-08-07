@@ -1,52 +1,52 @@
-from datetime import datetime, timedelta, timezone
-from io import BytesIO
-import json
-import logging
-import os
-import re
-from urllib.request import Request, urlopen
-from urllib.parse import urlparse
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageOps
-
 from ..domain.models import GenerationStatus
-from ..infrastructure.sqlite_repository import SQLiteRepository
-from ..infrastructure.media_store import media_store
 from ..llm_service.planner import ScriptPlanner
-from ..llm_service.client.ark_client import ArkClient
-from ..llm_service.client.openai_client import OpenAICLient, OpenAIClientBaseOptions
 
-
-logger = logging.getLogger(__name__)
-
-
-def utc_now_after(seconds: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 class TaskServiceAssetMixin:
-    """Behavior slice of TaskService."""
+    """Generate reusable drama assets requested by the editor.
+
+    Asset panels and the placeholder-layout dialog call this workflow. It owns
+    durable image tasks and converts editor-only layout guidance into clean
+    provider-generated images suitable for downstream video references.
+    """
 
     @staticmethod
     def _placeholder_prompt(
         project: dict[str, Any],
         scene: dict[str, Any],
+        characters: list[dict[str, Any]],
+        props: list[dict[str, Any]],
         placements: list[dict[str, Any]],
     ) -> str:
         position_lines = []
         for index, placement in enumerate(placements):
+            role = next(
+                (item for item in characters if item.get("id") == placement["asset_id"]),
+                {},
+            )
+            horizontal = "左侧" if placement["x"] < 0.34 else "右侧" if placement["x"] > 0.66 else "中央"
+            vertical = "前景" if placement["y"] > 0.5 else "中景" if placement["y"] > 0.22 else "后景"
             position_lines.append(
-                f"角色{index + 1}位于画面 x={placement['x']:.2f}, y={placement['y']:.2f}, "
-                f"宽度={placement['width']:.2f}, 高度={placement['height']:.2f}，"
+                f"参考图{index + 2}中的角色“{role.get('name', '角色')}”位于画面{horizontal}{vertical}，"
+                f"相对位置 x={placement['x']:.2f}, y={placement['y']:.2f}，"
+                f"画面占比宽={placement['width']:.2f}, 高={placement['height']:.2f}；"
                 f"动作/备注：{placement.get('note') or '站立'}"
             )
+        prop_lines = [
+            f"道具“{item.get('name')}”：{item.get('prompt', '')}" for item in props
+        ]
         return "\n".join(
             [
-                "生成一张用于视频生成模型参考的占位布局图。",
+                "生成一张干净、完整、可直接提供给视频生成模型的镜头构图参考图。",
                 f"场景：{scene.get('name', '未命名场景')}；场景提示词：{scene.get('prompt', '')}",
-                f"风格：{project.get('style', '真人风格')}；画幅：{project.get('ratio', '9:16')}",
-                "请用清晰的方框和字母标记角色在场景中的相对位置，不要改变场景结构。",
+                f"风格：{project.get('style', '真人风格')}；背景主题：{project.get('theme', '')}；画幅：{project.get('ratio', '9:16')}",
+                "参考图1是场景；后续参考图是角色和剧情相关道具。保持参考人物脸部、服装、道具材质与场景结构一致。",
                 *position_lines,
+                *prop_lines,
+                "将角色和道具自然融合进场景并符合透视、遮挡、光影和比例关系。",
+                "输出必须是无编辑痕迹的成片参考图：不要方框、字母、标签、箭头、辅助线、坐标、界面、文字或水印。",
             ]
         )
 
@@ -80,61 +80,70 @@ class TaskServiceAssetMixin:
             )
         return normalized[:30]
 
-    @staticmethod
-    def _render_placeholder_layout(
-        scene_bytes: bytes,
+    def _placeholder_reference_assets(
+        self,
+        project: dict[str, Any],
+        shot: dict[str, Any],
+        scene: dict[str, Any],
         placements: list[dict[str, Any]],
-        ratio: str,
-    ) -> bytes:
-        width, height = (720, 1280) if ratio == "9:16" else (1280, 720)
-        with Image.open(BytesIO(scene_bytes)) as source:
-            canvas = ImageOps.fit(
-                source.convert("RGB"),
-                (width, height),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.5),
-            )
-        draw = ImageDraw.Draw(canvas, "RGBA")
-        for index, placement in enumerate(placements):
-            x = round(placement["x"] * width)
-            y = round(placement["y"] * height)
-            box_width = max(24, round(placement["width"] * width))
-            box_height = max(24, round(placement["height"] * height))
-            right = min(width - 1, x + box_width)
-            bottom = min(height - 1, y + box_height)
-            draw.rectangle(
-                (x, y, right, bottom),
-                fill=(249, 115, 22, 35),
-                outline=(249, 115, 22, 255),
-                width=max(3, round(width / 320)),
-            )
-            label = chr(65 + index % 26)
-            label_top = max(0, y - 30)
-            draw.rectangle((x, label_top, x + 30, label_top + 30), fill=(249, 115, 22, 255))
-            draw.text((x + 9, label_top + 6), label, fill=(255, 255, 255, 255))
-        output = BytesIO()
-        canvas.save(output, format="JPEG", quality=92, subsampling=0)
-        return output.getvalue()
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        assets = {str(item.get("id")): item for item in project.get("assets", [])}
+        characters: list[dict[str, Any]] = []
+        for placement in placements:
+            role = assets.get(str(placement.get("asset_id") or ""))
+            if role is None or role.get("type") != "character":
+                raise ValueError("占位图只能放置角色素材")
+            if not role.get("image_url"):
+                raise ValueError(f"角色“{role.get('name', '未命名')}”尚未生成图片")
+            if role not in characters:
+                characters.append(role)
+        explicit_ids = {str(value) for value in shot.get("reference_asset_ids") or []}
+        for node in shot.get("prompt_rich") or []:
+            if isinstance(node, dict) and node.get("type") == "reference":
+                explicit_ids.add(str(node.get("asset_id") or ""))
+        context = "\n".join(
+            str(shot.get(key) or "") for key in ("title", "original_text", "prompt")
+        )
+        props: list[dict[str, Any]] = []
+        for candidate in assets.values():
+            if candidate.get("type") != "prop":
+                continue
+            explicit = str(candidate.get("id")) in explicit_ids
+            mentioned = bool(candidate.get("name") and str(candidate["name"]) in context)
+            if not explicit and not mentioned:
+                continue
+            if not candidate.get("image_url"):
+                if explicit:
+                    raise ValueError(f"道具“{candidate.get('name', '未命名')}”尚未生成图片")
+                continue
+            props.append(candidate)
+        return [scene, *characters, *props], characters, props
 
-    @staticmethod
-    def _read_media_bytes(url: str) -> bytes:
-        if url.startswith("/api/media/"):
-            media_id = url.removeprefix("/api/media/").split("?", 1)[0]
-            path = media_store.path_for(media_id)
-            if path is None:
-                raise RuntimeError("当前媒体存储无法读取场景图片")
-            return path.read_bytes()
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise RuntimeError("场景图片地址无效")
-        request = Request(url, headers={"User-Agent": "ai-application-factory/1.0"})
-        with urlopen(request, timeout=60) as response:  # noqa: S310 - configured media URL
-            return response.read()
+    def _generate_placeholder_image_url(
+        self,
+        project: dict[str, Any],
+        placeholder: dict[str, Any],
+        references: list[dict[str, Any]],
+    ) -> str:
+        options = self._provider_options(project, "multimodal")
+        if not options.get("api_key"):
+            raise RuntimeError("未配置图像模型 API Key，无法生成占位图")
+        ratio = str(project.get("ratio") or "9:16")
+        prompt = str(placeholder.get("prompt") or "")
+        reference_images = [
+            self._cover_reference_input(str(item["image_url"])) for item in references
+        ]
+        result = self._generate_provider_image(
+            options, prompt, ratio=ratio, reference_images=reference_images
+        )
+        return self._persist_provider_result(result, ".png", "占位图模型")
 
     def run_asset_variant_image(
         self, task_id: str, project_id: str, asset_id: str, variant_id: str
     ) -> None:
         try:
+            if self._asset_image_task_cancelled(task_id):
+                return
             project = self.get_project(project_id)
             asset = self.repository.get_asset(project_id, asset_id)
             if asset is None:
@@ -161,6 +170,8 @@ class TaskServiceAssetMixin:
                 ),
             }
             image_url = self._generate_image_url(project, variant_asset)
+            if self._asset_image_task_cancelled(task_id):
+                return
             updated = self.repository.update_asset_variant_status(
                 project_id,
                 asset_id,
@@ -183,6 +194,8 @@ class TaskServiceAssetMixin:
                 },
             )
         except Exception as exc:
+            if self._asset_image_task_cancelled(task_id):
+                return
             self.repository.update_asset_variant_status(
                 project_id, asset_id, variant_id, GenerationStatus.FAILED
             )
@@ -250,12 +263,9 @@ class TaskServiceAssetMixin:
         normalized_placements = self._normalize_placeholder_placements(placements)
         if not normalized_placements:
             raise ValueError("请至少添加一个角色到占位图")
-        for placement in normalized_placements:
-            role = self.repository.get_asset(project_id, placement["asset_id"])
-            if role is None or role.get("type") != "character":
-                raise ValueError("占位图只能放置已生成的角色素材")
-            if not role.get("image_url"):
-                raise ValueError(f"角色“{role.get('name', '未命名')}”尚未生成图片")
+        references, characters, props = self._placeholder_reference_assets(
+            project, shot, scene, normalized_placements
+        )
 
         active_task = self.repository.get_active_task_by_snapshot(
             project_id, "placeholder_image", "shot_id", shot_id
@@ -268,6 +278,8 @@ class TaskServiceAssetMixin:
             for asset in project.get("assets", [])
             if asset.get("type") == "placeholder"
             and (asset.get("metadata") or {}).get("shot_id") == shot_id
+            and (asset.get("metadata") or {}).get("render_mode")
+            == "generated_composite"
         )
         metadata = {
             "shot_id": shot_id,
@@ -275,8 +287,14 @@ class TaskServiceAssetMixin:
             "scene_name": scene.get("name", "场景"),
             "placements": normalized_placements,
             "version": version,
+            "render_mode": "generated_composite",
+            "character_asset_ids": [item["id"] for item in characters],
+            "prop_asset_ids": [item["id"] for item in props],
+            "reference_asset_ids": [item["id"] for item in references],
         }
-        prompt = self._placeholder_prompt(project, scene, normalized_placements)
+        prompt = self._placeholder_prompt(
+            project, scene, characters, props, normalized_placements
+        )
         asset = self.repository.create_asset(
             project_id,
             "placeholder",
@@ -297,6 +315,8 @@ class TaskServiceAssetMixin:
                 "asset_id": asset["id"],
                 "scene_asset_id": scene_asset_id,
                 "placements": normalized_placements,
+                "reference_asset_ids": metadata["reference_asset_ids"],
+                "render_mode": "generated_composite",
                 "type": "placeholder_image",
             },
         )
@@ -316,15 +336,22 @@ class TaskServiceAssetMixin:
             if asset is None:
                 raise KeyError(f"Placeholder asset not found: {asset_id}")
             metadata = asset.get("metadata") or {}
-            scene = self.repository.get_asset(project_id, str(metadata.get("scene_asset_id") or ""))
-            if scene is None or not scene.get("image_url"):
-                raise ValueError("占位图的场景图片不可用")
-            image = self._render_placeholder_layout(
-                self._read_media_bytes(str(scene["image_url"])),
-                self._normalize_placeholder_placements(metadata.get("placements") or []),
-                str(project.get("ratio") or "9:16"),
+            reference_ids = [
+                str(value) for value in metadata.get("reference_asset_ids") or []
+            ]
+            references = [
+                item
+                for item in project.get("assets", [])
+                if str(item.get("id")) in reference_ids
+            ]
+            if len(references) != len(set(reference_ids)) or any(
+                not item.get("image_url") for item in references
+            ):
+                raise ValueError("占位图引用的场景、角色或道具图片不可用")
+            references.sort(key=lambda item: reference_ids.index(str(item.get("id"))))
+            image_url = self._generate_placeholder_image_url(
+                project, asset, references
             )
-            image_url = media_store.save(image, ".jpg", content_type="image/jpeg")
             self.repository.update_asset_status(
                 asset_id, GenerationStatus.SUCCEEDED, image_url=image_url
             )
@@ -334,28 +361,45 @@ class TaskServiceAssetMixin:
                 prompt_rich = list(shot.get("prompt_rich") or [])
                 if not prompt_rich and shot.get("prompt"):
                     prompt_rich = [{"type": "text", "text": shot["prompt"]}]
-                if not any(node.get("asset_id") == asset_id for node in prompt_rich if isinstance(node, dict)):
-                    prompt_rich.extend(
-                        [
-                            {"type": "text", "text": "\n布局参考："},
-                            {
-                                "type": "reference",
-                                "asset_id": asset_id,
-                                "asset_type": "placeholder",
-                                "label": asset.get("name", "占位图"),
-                                "image_url": image_url,
-                            },
-                        ]
+                prompt_rich = [
+                    node
+                    for node in prompt_rich
+                    if not (
+                        isinstance(node, dict)
+                        and (
+                            (
+                                node.get("type") == "reference"
+                                and node.get("asset_type") == "placeholder"
+                            )
+                            or (
+                                node.get("type") == "text"
+                                and str(node.get("text") or "").strip()
+                                in {"布局参考：", "占位图参考："}
+                            )
+                        )
                     )
-                    self.repository.update_shot(
-                        project_id,
-                        shot_id,
-                        prompt=ScriptPlanner.rich_prompt_to_text(prompt_rich),
-                        prompt_rich=prompt_rich,
-                        placeholder_scene_asset_id=str(metadata.get("scene_asset_id") or ""),
-                        placeholder_placements=metadata.get("placements") or [],
-                        status=GenerationStatus.NOT_GENERATED,
-                    )
+                ]
+                prompt_rich.extend(
+                    [
+                        {"type": "text", "text": "\n占位图参考："},
+                        {
+                            "type": "reference",
+                            "asset_id": asset_id,
+                            "asset_type": "placeholder",
+                            "label": asset.get("name", "占位图"),
+                            "image_url": image_url,
+                        },
+                    ]
+                )
+                self.repository.update_shot(
+                    project_id,
+                    shot_id,
+                    prompt=ScriptPlanner.rich_prompt_to_text(prompt_rich),
+                    prompt_rich=prompt_rich,
+                    placeholder_scene_asset_id=str(metadata.get("scene_asset_id") or ""),
+                    placeholder_placements=metadata.get("placements") or [],
+                    status=GenerationStatus.NOT_GENERATED,
+                )
             self.repository.update_task_status(
                 task_id,
                 GenerationStatus.SUCCEEDED,
@@ -364,6 +408,8 @@ class TaskServiceAssetMixin:
                     "image_url": image_url,
                     "scene_asset_id": metadata.get("scene_asset_id"),
                     "placements": metadata.get("placements") or [],
+                    "reference_asset_ids": reference_ids,
+                    "render_mode": "generated_composite",
                 },
             )
         except Exception as exc:

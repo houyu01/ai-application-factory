@@ -34,6 +34,11 @@ class FakeSyncResponses:
 class FakeSyncClient:
     def __init__(self, responses):
         self.responses = FakeSyncResponses(responses)
+        self.timeouts = []
+
+    def with_options(self, *, timeout):
+        self.timeouts.append(timeout)
+        return self
 
 
 class FakeImageResponse:
@@ -135,6 +140,14 @@ def test_completion_uses_sync_client_and_returns_text_after_tool_round():
     assert result == "完成"
     assert len(sync_client.responses.requests) == 2
     assert client.history[-1]["type"] == "function_call_output"
+
+
+def test_completion_applies_a_per_request_timeout():
+    sync_client = FakeSyncClient([FakeResponse([], output_text="完成")])
+    client = make_client(sync_client=sync_client)
+
+    assert client.completion([{"role": "user", "content": "开始"}], timeout=12) == "完成"
+    assert sync_client.timeouts == [12]
 
 
 def test_completion_stream_yields_text_and_executes_tool():

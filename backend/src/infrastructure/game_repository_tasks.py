@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select, update
 
 from ..domain.models import GenerationStatus
 from .orm_models import GameTask
@@ -55,27 +55,37 @@ class GameRepositoryTaskMixin:
         return self._task_from_row(task) if task else None
 
     def claim_next_runnable_task(self, lease_seconds: int = 60) -> dict[str, Any] | None:
-        """Lease the oldest runnable generating task for one worker."""
+        """Atomically lease one runnable game task for a concurrent worker slot."""
 
         now = datetime.now(timezone.utc).isoformat()
         lease_until = (datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)).isoformat()
         lease_token = str(uuid4())
-        with self.database.session() as session:
-            task = session.scalars(
-                select(GameTask)
-                .where(
-                    GameTask.status == GenerationStatus.GENERATING.value,
-                    or_(GameTask.next_poll_at.is_(None), GameTask.next_poll_at <= now),
-                    or_(GameTask.poll_lease_until.is_(None), GameTask.poll_lease_until <= now),
-                )
+        runnable = (
+            GameTask.status == GenerationStatus.GENERATING.value,
+            or_(GameTask.next_poll_at.is_(None), GameTask.next_poll_at <= now),
+            or_(GameTask.poll_lease_until.is_(None), GameTask.poll_lease_until <= now),
+        )
+        with self.database.task_claim_lock, self.database.session() as session:
+            task_id = session.scalar(
+                select(GameTask.id)
+                .where(*runnable)
                 .order_by(GameTask.next_poll_at, GameTask.created_at)
                 .limit(1)
-            ).first()
-            if task is None:
+            )
+            if task_id is None:
                 return None
-            task.poll_lease_token = lease_token
-            task.poll_lease_until = lease_until
-            task.poll_attempts = (task.poll_attempts or 0) + 1
+            claimed = session.execute(
+                update(GameTask)
+                .where(GameTask.id == task_id, *runnable)
+                .values(
+                    poll_lease_token=lease_token,
+                    poll_lease_until=lease_until,
+                    poll_attempts=GameTask.poll_attempts + 1,
+                )
+            )
+            if claimed.rowcount != 1:
+                return None
+            task = session.get(GameTask, task_id)
             session.flush()
             return self._task_from_row(task)
 

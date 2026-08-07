@@ -24,8 +24,8 @@ export function configureSettingsRuntime(next: SettingsRuntime) {
 }
 
 export function modelChoices(kind: ModelKind) {
-  const configured = runtime.modelSettings[kind].models || [];
-  return configured.length ? configured : runtime.defaultModelSettings[kind].models;
+  const configured = runtime.modelSettings[kind].models;
+  return Array.isArray(configured) ? configured : runtime.defaultModelSettings[kind].models;
 }
 
 export function modelEditorValues(card: HTMLElement) {
@@ -55,6 +55,20 @@ export function renderModelEditor(card: HTMLElement, kind: ModelKind, values: st
   options.innerHTML = models.map(value => `<div class="model-choice-option ${value === active ? 'active' : ''}" data-model-entry="${runtime.escapeHtml(value)}" data-model-option="${runtime.escapeHtml(value)}"><button type="button" class="model-choice-option-select" data-model-select-option="${runtime.escapeHtml(value)}">${runtime.escapeHtml(value)}</button><button type="button" class="model-choice-option-delete" data-model-remove="${runtime.escapeHtml(value)}" aria-label="删除 ${runtime.escapeHtml(value)}" title="删除">🗑</button></div>`).join('') || '<div class="model-choice-empty">暂无模型，请在下方添加</div>';
   menu.hidden = true;
   trigger.setAttribute('aria-expanded', 'false');
+}
+
+/** Persist dropdown option edits without probing the provider connection. */
+export async function saveModelOptions(kind: ModelKind, models: string[], model: string) {
+  const response = await fetch(`${runtime.apiBaseUrl}/settings/models/${kind}/options`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ models, model }),
+  });
+  const payload = await response.json().catch(() => ({})) as ModelSettings & { detail?: string };
+  if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+  runtime.modelSettings[kind] = { ...runtime.modelSettings[kind], ...payload };
+  refreshModelSelects();
+  return payload;
 }
 
 function modelChoiceEditorMarkup(models: string[], selected: string) {
@@ -118,7 +132,7 @@ export async function loadModelSettings(): Promise<boolean> {
       runtime.modelSettings[kind] = {
         ...runtime.defaultModelSettings[kind],
         ...item,
-        models: Array.isArray(item.models) && item.models.length ? item.models : runtime.defaultModelSettings[kind].models,
+        models: Array.isArray(item.models) ? item.models : runtime.defaultModelSettings[kind].models,
       };
     });
     refreshModelSelects();
@@ -133,8 +147,24 @@ export async function loadModelSettings(): Promise<boolean> {
 export function modelSettingsCard(kind: ModelKind, title: string, description: string, icon: string, saveLabel: string) {
   const config = runtime.modelSettings[kind];
   const models = modelChoices(kind);
-  const endpointFields = kind === 'video' ? `<label>创建视频生成任务 URL<input data-model-create-url value="${runtime.escapeHtml(config.create_url || '')}" placeholder="https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks" /></label><label>查询视频生成任务 URL<input data-model-query-url value="${runtime.escapeHtml(config.query_url || '')}" placeholder="https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/{id}" /></label>` : `<label>Endpoint<input data-model-endpoint value="${runtime.escapeHtml(config.endpoint || '')}" placeholder="https://ark.cn-beijing.volces.com/api/plan/v3" /></label>`;
-  return `<div class="settings-card model-settings-card" data-model-config-card data-model-kind="${kind}"><div class="settings-card-header"><div class="setting-icon">${icon}</div><div><h2>${title}</h2><p>${description}</p></div></div>${endpointFields}<label>API Key<div class="model-api-key-input"><input data-model-api-key type="password" autocomplete="new-password" placeholder="${config.api_key_set ? '********（已配置，点击眼睛查看）' : '请输入 API Key'}" /><button type="button" class="ghost model-api-key-toggle" data-model-api-key-toggle aria-label="查看 API Key" title="查看 API Key">${apiKeyVisibilityIcon(false)}</button></div></label>${modelChoiceEditorMarkup(models, config.model)}<button class="primary wide" data-save-model-config>${saveLabel}</button></div>`;
+  const provider = config.provider || 'ark';
+  const providerSelect = `<label>${title}服务商<select data-model-provider><option value="ark" ${provider === 'ark' ? 'selected' : ''}>火山引擎</option><option value="dashscope" ${provider === 'dashscope' ? 'selected' : ''}>阿里云 DashScope</option><option value="tencent" ${provider === 'tencent' ? 'selected' : ''}>腾讯云</option></select></label>`;
+  const endpoint = (label: string, fallback: string) => `<label>${label}<input data-model-endpoint value="${runtime.escapeHtml(config.endpoint || fallback)}" placeholder="${runtime.escapeHtml(fallback)}" /></label>`;
+  const apiKey = (label = 'API Key') => `<label>${label}<div class="model-api-key-input"><input data-model-api-key type="password" autocomplete="new-password" placeholder="${config.api_key_set ? '********（已配置，点击眼睛查看）' : `请输入 ${label}`}" /><button type="button" class="ghost model-api-key-toggle" data-model-api-key-toggle aria-label="查看 ${label}" title="查看 ${label}">${apiKeyVisibilityIcon(false)}</button></div></label>`;
+  const tencentSecrets = () => `<label>腾讯云地域<input data-model-region value="${runtime.escapeHtml(config.region || 'ap-guangzhou')}" placeholder="ap-guangzhou" /></label><label>腾讯云 SecretId<input data-model-secret-id autocomplete="off" placeholder="${runtime.escapeHtml(config.secret_id_masked ? `已配置 ${config.secret_id_masked}，留空保持不变` : '请输入 SecretId')}" /></label><label>腾讯云 SecretKey<input data-model-secret-key type="password" autocomplete="new-password" placeholder="${config.secret_key_set ? '已配置，留空保持不变' : '请输入 SecretKey'}" /></label>`;
+  const connectionFields = (() => {
+    if (kind === 'video') return provider === 'tencent' ? `${providerSelect}${endpoint('腾讯云 MPS Endpoint', 'https://mps.tencentcloudapi.com')}${tencentSecrets()}` : `${providerSelect}<label>${provider === 'dashscope' ? '阿里云创建视频任务 URL' : '创建视频生成任务 URL'}<input data-model-create-url value="${runtime.escapeHtml(config.create_url || '')}" placeholder="按服务商自动填充" /></label><label>${provider === 'dashscope' ? '阿里云查询视频任务 URL' : '查询视频生成任务 URL'}<input data-model-query-url value="${runtime.escapeHtml(config.query_url || '')}" placeholder="按服务商自动填充" /></label>${apiKey('API Key')}`;
+    if (kind === 'audio') {
+      if (provider === 'ark') return `${providerSelect}<label>火山引擎 TTS AppID<input data-model-app-id value="${runtime.escapeHtml(config.app_id || '')}" placeholder="语音应用 AppID" /></label><label>火山引擎提交任务 URL<input data-model-create-url value="${runtime.escapeHtml(config.create_url || '')}" placeholder="按服务商自动填充" /></label><label>火山引擎查询任务 URL<input data-model-query-url value="${runtime.escapeHtml(config.query_url || '')}" placeholder="按服务商自动填充" /></label><label>Resource-Id<input data-model-resource-id value="${runtime.escapeHtml(config.resource_id || 'volc.tts_async.default')}" placeholder="volc.tts_async.default" /></label><label>Voice Type<input data-model-voice value="${runtime.escapeHtml(config.voice || 'BV001_streaming')}" placeholder="BV001_streaming" /></label>${apiKey('火山引擎 Access Token')}`;
+      if (provider === 'tencent') return `${providerSelect}${endpoint('腾讯云 MPS Endpoint', 'https://mps.tencentcloudapi.com')}${tencentSecrets()}<label>腾讯云 VoiceId<input data-model-voice value="${runtime.escapeHtml(config.voice || '')}" placeholder="MPS 可用 VoiceId" /></label>`;
+      return `${providerSelect}${endpoint('阿里云 TTS Endpoint', 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation')}<label>阿里云 Voice<input data-model-voice value="${runtime.escapeHtml(config.voice || 'Cherry')}" placeholder="Cherry" /></label>${apiKey('API Key')}`;
+    }
+    const defaults = kind === 'language' ? { ark: 'https://ark.cn-beijing.volces.com/api/v3', dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1', tencent: 'https://api.hunyuan.cloud.tencent.com/v1' } : { ark: 'https://ark.cn-beijing.volces.com/api/plan/v3', dashscope: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', tencent: 'https://tokenhub.tencentmaas.com/v1/api/image/submit' };
+    return `${providerSelect}${endpoint(`${provider === 'tencent' ? '腾讯云' : provider === 'dashscope' ? '阿里云' : '火山引擎'} Endpoint`, defaults[provider])}${apiKey('API Key')}`;
+  })();
+  const queueLabel = ({ language: '剧本与提示词', multimodal: '图片', video: '视频', audio: '语音' } as Record<ModelKind, string>)[kind];
+  const concurrencyField = `<label>${queueLabel}队列并发数<input data-generation-concurrency type="number" min="1" max="8" step="1" value="${runtime.escapeHtml(config.generation_concurrency || 2)}" /><small>此队列同时执行的任务数量；范围 1–8，与其他模型队列互不占用。</small></label>`;
+  return `<div class="settings-card model-settings-card" data-model-config-card data-model-kind="${kind}"><div class="settings-card-header"><div class="setting-icon">${icon}</div><div><h2>${title}</h2><p>${description}</p></div></div>${connectionFields}${concurrencyField}${modelChoiceEditorMarkup(models, config.model)}<button class="primary wide" data-save-model-config>${saveLabel}</button></div>`;
 }
 
 export function voiceCatalogCard() {

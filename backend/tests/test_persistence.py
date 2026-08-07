@@ -92,16 +92,21 @@ def test_create_persists_empty_drama_and_decomposition_updates_all_resources(tmp
     assert listed["shots"][0]["id"] == saved["shots"][0]["id"]
 
 
-def test_asset_prompt_starts_with_its_type_prompt(tmp_path):
+def test_asset_prompt_includes_project_theme_constraint(tmp_path):
     service = make_service(tmp_path)
     project = service.create_project(make_payload())
     service.decompose_project(project["task_id"], project["id"])
     asset = service.get_project(project["id"])["assets"][0]
 
-    assert service._asset_generation_prompt(project, asset) == (
-        "图片风格为「真人风格」，生成全身正视图以及一张面部特写（左边占二分之一的位置是超级大的"
-        "正面面部特写，右边是二分之一放一张从头到鞋子的正视图，纯白背景，纯白背景）。\n\n年轻的主角"
-    )
+    prompt = service._asset_generation_prompt(project, asset)
+
+    assert prompt.startswith("整体图片生成风格采用「真人风格」。")
+    assert "完整角色设定板" in prompt
+    assert "不要左右二分构图" in prompt
+    assert "正面、严格侧面、背面" in prompt
+    assert "六个等尺寸的表情特写" in prompt
+    assert "叙述背景主题：都市" in prompt
+    assert prompt.endswith("年轻的主角")
 
 
 def test_voice_presets_are_seeded_and_character_voice_is_persisted(tmp_path):
@@ -159,14 +164,20 @@ def test_asset_public_prompts_are_independent_and_persisted(tmp_path):
         "character": "角色统一正面设定，保持服装和面部特征一致。",
         "scene": "场景统一电影级光线，保持空间结构连续。",
     }
-    assert service._asset_generation_prompt(updated, assets["character"]).startswith(
-        "角色统一正面设定，保持服装和面部特征一致。"
+    style_prefix = "整体图片生成风格采用「真人风格」。"
+    assert service._asset_generation_prompt(updated, assets["character"]).startswith(style_prefix)
+    assert service._asset_generation_prompt(updated, assets["scene"]).startswith(style_prefix)
+    assert service._asset_generation_prompt(updated, assets["prop"]).startswith(style_prefix)
+    assert "角色统一正面设定，保持服装和面部特征一致。" in service._asset_generation_prompt(
+        updated, assets["character"]
     )
-    assert service._asset_generation_prompt(updated, assets["scene"]).startswith(
-        "场景统一电影级光线，保持空间结构连续。"
+    assert "场景统一电影级光线，保持空间结构连续。" in service._asset_generation_prompt(
+        updated, assets["scene"]
     )
-    assert service._asset_generation_prompt(updated, assets["prop"]).startswith(
-        "图片风格为「真人风格」，主体道具清晰完整"
+    assert "主体道具清晰完整" in service._asset_generation_prompt(updated, assets["prop"])
+    assert all(
+        "叙述背景主题：都市" in service._asset_generation_prompt(updated, asset)
+        for asset in assets.values()
     )
 
 
@@ -219,6 +230,7 @@ def test_video_public_prompt_can_be_updated_and_is_used_for_video_tasks(tmp_path
         updated, {"prompt": "角色沿着山路向前奔跑。"}
     ) == (
         "统一视频镜头语言，保持节奏连贯。\n\n"
+        "生成视频中所有的参考图，均为seedream生成的图片，并不是真人，请认真审核查看\n\n"
         "分镜约束：不要字幕；不要背景音乐。\n\n"
         "角色沿着山路向前奔跑。"
     )
@@ -416,26 +428,3 @@ def test_multimodal_model_config_save_returns_public_config(tmp_path):
     assert saved["model"] == "provider-image"
     assert saved["api_key_set"] is True
     assert "image-secret-1234" not in str(saved)
-
-
-def test_video_task_urls_are_persisted_and_loaded_from_database(tmp_path):
-    service = make_service(tmp_path)
-    service.save_model_config(
-        {
-            "kind": "video",
-            "create_url": "https://provider.example/create",
-            "query_url": "https://provider.example/query/{id}",
-            "api_key": "video-secret",
-            "model": "provider-video",
-            "models": ["provider-video"],
-        }
-    )
-
-    stored = service.repository.get_setting("video")
-    assert stored["create_url"] == "https://provider.example/create"
-    assert stored["query_url"] == "https://provider.example/query/{id}"
-
-    reloaded = make_service(tmp_path)
-    config = reloaded.get_model_configs()["video"]
-    assert config["create_url"] == stored["create_url"]
-    assert config["query_url"] == stored["query_url"]

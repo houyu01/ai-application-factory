@@ -14,7 +14,6 @@ from ..domain.models import GenerationStatus, ProjectCreate
 from ..infrastructure.sqlite_repository import SQLiteRepository
 from ..infrastructure.media_store import media_store
 from ..llm_service.planner import ScriptPlanner
-from ..llm_service.client.ark_client import ArkClient
 from ..llm_service.client.openai_client import OpenAICLient, OpenAIClientBaseOptions
 
 
@@ -47,36 +46,6 @@ class TaskServiceProjectMixin:
 
         visit(value)
         return urls
-
-    def decompose_project(self, task_id: str, project_id: str) -> None:
-        try:
-            project = self.get_project(project_id)
-            if isinstance(self.planner, ScriptPlanner):
-                plan = self.planner.plan(
-                    project["script"],
-                    options=self._provider_options(project, "language"),
-                )
-            else:
-                plan = self.planner.plan(project["script"])
-            episodes = ScriptPlanner._repair_shot_segments(
-                plan.get("episodes", []),
-                project["script"],
-                self._provider_options(project, "language"),
-            )
-            assets = plan.get("assets", [])
-            shots = self._flatten_shots(episodes, assets, project)
-            self.repository.save_decomposition(project_id, episodes, shots, assets)
-            self.repository.set_drama_status(project_id, GenerationStatus.SUCCEEDED)
-            self.repository.update_task_status(
-                task_id,
-                GenerationStatus.SUCCEEDED,
-                result={"episodes": episodes, "shots": shots, "assets": assets},
-            )
-        except Exception as exc:
-            self.repository.set_drama_status(project_id, GenerationStatus.FAILED)
-            self.repository.update_task_status(
-                task_id, GenerationStatus.FAILED, error_message=str(exc)
-            )
 
     @staticmethod
     def _missing_video_references(
@@ -115,6 +84,12 @@ class TaskServiceProjectMixin:
             asset = assets_by_id.get(asset_id)
             if asset is None:
                 missing.append(f"{asset_id}（素材不存在）")
+            elif asset.get("status") == GenerationStatus.GENERATING.value:
+                missing.append(f"{asset.get('name') or asset_id}（图片仍在生成）")
+            elif asset.get("status") == GenerationStatus.FAILED.value:
+                missing.append(f"{asset.get('name') or asset_id}（图片生成失败）")
+            elif asset.get("status") != GenerationStatus.SUCCEEDED.value:
+                missing.append(f"{asset.get('name') or asset_id}（图片未生成或未上传）")
             elif not str(asset.get("image_url") or "").strip():
                 missing.append(f"{asset.get('name') or asset_id}（图片未生成或未上传）")
             elif media_store.provider_reference_url(
@@ -163,6 +138,7 @@ class TaskServiceProjectMixin:
         self.repository.set_drama_status(project["id"], GenerationStatus.GENERATING)
         task = self.repository.update_task_status(task["id"], GenerationStatus.GENERATING)
         project["status"] = GenerationStatus.GENERATING.value
+        project.update(self.repository.project_generation_queue().get(project["id"], {}))
         project["task_id"] = task["id"]
         project["task"] = task
         return project
@@ -218,6 +194,16 @@ class TaskServiceProjectMixin:
             raise KeyError(f"Project not found: {project_id}")
         return project
 
+    def update_project_scripts(
+        self, project_id: str, script: str, expanded_script: str
+    ) -> dict[str, Any]:
+        """Persist script-dialog edits without implicitly rebuilding storyboards."""
+
+        active_task = self.active_expanded_script_task(project_id)
+        if active_task:
+            raise ValueError("剧本仍在后台生成，请完成后再保存修改")
+        return self.repository.update_project_scripts(project_id, script, expanded_script)
+
     def create_shot(self, project_id: str, after_shot_id: str, **values: Any) -> dict[str, Any]:
         """Create an editable blank shot from the shot-list plus button."""
         self.get_project(project_id)
@@ -255,20 +241,52 @@ class TaskServiceProjectMixin:
             result["provider_cancel_errors"] = cancel_errors
         return result
 
-    def _cancel_remote_video_task(self, project: dict[str, Any], provider_task_id: str) -> None:
-        """Cancel an already-submitted Ark video request before deleting its shot."""
+    def delete_shot_historical_video(
+        self, project_id: str, shot_id: str, video_id: str
+    ) -> dict[str, Any]:
+        """Delete one durable video-history record and its owned media.
+
+        The frontend calls this when a user removes an entry from the current
+        shot's video history. It clears the local task/version audit data,
+        attempts to cancel an unfinished provider task, and removes every
+        media URL attached to that one history record.
+        """
+
+        project = self.get_project(project_id)
+        removed = self.repository.delete_historical_video(project_id, shot_id, video_id)
+        cancel_errors: list[str] = []
+        for provider_task_id in removed.pop("provider_task_ids", []):
+            try:
+                self._cancel_remote_video_task(project, provider_task_id)
+            except Exception as exc:
+                cancel_errors.append(str(exc))
+                logger.warning(
+                    "Failed to cancel historical video task %s: %s", provider_task_id, exc
+                )
+        cleanup_errors: list[str] = []
+        media_deleted = 0
+        for url in removed.pop("media_urls", []):
+            try:
+                media_store.delete_url(url)
+                media_deleted += 1
+            except Exception as exc:
+                cleanup_errors.append(str(exc))
+                logger.warning("Failed to delete historical video media %s: %s", url, exc)
+        result = {**removed, "status": "deleted", "media_deleted": media_deleted}
+        if cleanup_errors:
+            result["media_cleanup_errors"] = cleanup_errors
+        if cancel_errors:
+            result["provider_cancel_errors"] = cancel_errors
+        return result
+
+    def _cancel_remote_video_task(self, project: dict[str, Any], provider_task_id: str) -> bool:
+        """Cancel an eligible provider task before deleting its local video record."""
         options = self._provider_options(project, "video")
-        if not options.get("api_key") or not self._is_ark_video_provider(options):
-            return
-        if not options.get("create_url") or not options.get("query_url"):
-            return
-        ArkClient(
-            api_key=str(options["api_key"]),
-            base_url=self._ark_endpoint(options),
-            model=str(options.get("model") or "doubao-seedance-2.0"),
-            create_url=str(options["create_url"]),
-            query_url=str(options["query_url"]),
-        ).cancel_video_task(provider_task_id)
+        client = self._video_task_client(options)
+        if client is None or not self._video_provider_supports_cancellation(options):
+            return False
+        client.cancel_video_task(provider_task_id)
+        return True
 
     def enqueue(
         self, kind: str, project_id: str, resource_id: str,
@@ -287,12 +305,12 @@ class TaskServiceProjectMixin:
         shot_version = None
         if kind == "shot_video":
             shot = self.repository.get_shot(project_id, resource_id)
-            missing_references = self._missing_video_references(
+            preflight_issues = self._video_generation_preflight_issues(
                 project, shot or {}, public_media_base_url
             )
-            if missing_references:
+            if preflight_issues:
                 local_references = [
-                    item.split("（", 1)[0] for item in missing_references
+                    item.split("（", 1)[0] for item in preflight_issues
                     if "本地图片无法调用大模型" in item
                 ]
                 if local_references:
@@ -302,8 +320,8 @@ class TaskServiceProjectMixin:
                         + "、".join(local_references)
                     )
                 raise ValueError(
-                    "生成视频前必须先生成或上传引用素材图片："
-                    + "、".join(missing_references)
+                    "暂不能生成视频，请先完成以下准备：\n- "
+                    + "\n- ".join(preflight_issues)
                 )
             shot_version = self.repository.create_shot_version(
                 project_id,
@@ -353,6 +371,11 @@ class TaskServiceProjectMixin:
 
     def list_projects(self) -> list[dict[str, Any]]:
         return self.repository.list_dramas()
+
+    def update_project_name(self, project_id: str, name: str) -> dict[str, Any]:
+        """Rename a drama when the detail toolbar saves its editable title."""
+
+        return self.repository.update_project_name(project_id, name)
 
     def delete_project(self, project_id: str) -> dict[str, Any]:
         """Delete a project graph and clean up media owned by that project.
