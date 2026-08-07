@@ -1,42 +1,12 @@
 # AI Application Factory
+<img width="3022" height="1468" alt="image" src="https://github.com/user-attachments/assets/d2c989d2-c4d8-49ac-956a-47ca2866fee6" />
 
-一个同时包含 TypeScript 和 Python 的多语言仓库。
 
-## 目录结构
+一个短剧和互动影视游戏创作的平台，一个兼容了阿里云、腾讯云、火山引擎多个引擎混用的创作平台底座，支持web/桌面端/ipad版
 
-```text
-.
-├── frontend/       # TypeScript + Vite 控制台
-├── backend/        # FastAPI 网关与异步任务编排
-│   └── src/
-│       ├── api/             # Router / 网站服务调度层
-│       ├── application/     # 任务、项目、网关编排
-│       ├── domain/          # 领域模型
-│       └── llm_service/     # LLM / 多模态 Provider 与 Prompt Plan
-├── shared/         # OpenAPI、JSON Schema 等共享契约
-├── package.json    # 根级 TypeScript 工作区配置
-├── pyproject.toml  # 根级 Python 工具配置
-└── docker-compose.yml
-```
+<img width="2896" height="1452" alt="image" src="https://github.com/user-attachments/assets/ff38ffe8-cfe1-49fd-915f-c7787c12788d" />
 
-## 开发
+一句话生成并扩写10w字以上的剧本，剧本分镜全自动
 
-```bash
-# TypeScript 控制台
-npm install
-
-# 一键启动前后端
-npm run dev
-
-# 或分别启动
-npm run dev:backend   # 默认 8090，冲突时自动递增
-npm run dev:frontend  # 默认 5173，冲突时自动递增
-
-# Python 后端（在 backend 目录中使用 uv）
-cd backend
-uv sync
-./scripts/start.sh
-uv run pytest
-```
-
-当前已实现短剧列表、新建短剧、详情页、素材生成/视频生成任务入口和模型配置页面；LLM provider 具体调用位于 `backend/src/llm_service/`，目前用 deterministic planner 占位，后续可接入 Doubao 等模型。
+<img width="2894" height="1446" alt="image" src="https://github.com/user-attachments/assets/6b583650-6d26-4265-82c9-8add4ace7082" />
+素材自动生成
