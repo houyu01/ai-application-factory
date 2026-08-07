@@ -1,5 +1,3 @@
-import type { ApiProject, DramaPromptNode, DramaShot } from './models.js';
-import { dramaSelectedShot, dramaShotReferences, serializeDramaPromptNodes } from './drama_core_ui.js';
 import { dramaViewState } from './drama_state.js';
 
 type Runtime = {
@@ -14,54 +12,27 @@ function responseDetail(response: Response): Promise<string> {
     .catch(() => `HTTP ${response.status}`);
 }
 
-function shotNodes(project: ApiProject, shot: DramaShot): DramaPromptNode[] {
-  if (shot.prompt_rich?.length) return shot.prompt_rich;
-  return [{ type: 'text', text: shot.prompt || '' }, ...dramaShotReferences(project, shot)];
-}
-
-function withoutReference(nodes: DramaPromptNode[], referenceIndex: number): DramaPromptNode[] {
-  let index = -1;
-  return nodes.filter(node => {
-    if (node.type !== 'reference') return true;
-    index += 1;
-    return index !== referenceIndex;
-  });
-}
-
-function selectedAssetIds(nodes: DramaPromptNode[]): string[] {
-  return [...new Set(nodes.flatMap(node => node.type === 'reference' ? [node.asset_id] : []))];
-}
-
-/** Saves reference removal and starts missing-reference images without touching ready assets. */
+/** Clears the current shot's reference selection and prompt without deleting source assets. */
 export function configureDramaReferenceRemoval(runtime: Runtime) {
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
     const button = target?.closest<HTMLButtonElement>('[data-drama-remove-reference]');
     const projectId = dramaViewState.projectId;
     if (!button || !projectId || button.disabled) return;
-    const referenceIndex = Number(button.dataset.dramaRemoveReference);
-    if (!Number.isInteger(referenceIndex) || referenceIndex < 0) return;
+    const shotId = button.dataset.dramaShotId || dramaViewState.shotId;
+    if (!shotId) return;
     event.preventDefault();
     event.stopPropagation();
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
     void (async () => {
-      const projectResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}`);
-      if (!projectResponse.ok) throw new Error(await responseDetail(projectResponse));
-      const project = await projectResponse.json() as ApiProject;
-      const shot = dramaSelectedShot(project);
-      if (!shot) throw new Error('当前没有可编辑的分镜');
-      const nodes = shotNodes(project, shot);
-      const nextNodes = withoutReference(nodes, referenceIndex);
-      if (nextNodes.length === nodes.length) throw new Error('参考图已更新，请刷新后重试');
-      const serialized = serializeDramaPromptNodes(project, nextNodes);
-      const saveResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shot.id}`, {
+      const saveResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shotId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: serialized.prompt, prompt_rich: serialized.nodes, reference_asset_ids: selectedAssetIds(serialized.nodes) }),
+        body: JSON.stringify({ prompt: '', prompt_rich: [], reference_asset_ids: [] }),
       });
       if (!saveResponse.ok) throw new Error(await responseDetail(saveResponse));
       await runtime.reloadProject(projectId);
-      runtime.notify('已从当前分镜移除参考图');
+      runtime.notify('已清空当前分镜的参考图和提示词');
     })().catch(error => {
       console.error(error);
       runtime.notify(`移除参考图失败：${error instanceof Error ? error.message : '请重试'}`);
@@ -99,5 +70,36 @@ export function configureDramaReferenceRemoval(runtime: Runtime) {
         button.disabled = false;
         button.removeAttribute('aria-busy');
       });
+  }, true);
+
+  document.addEventListener('click', event => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest<HTMLButtonElement>('#drama-generate-shot-prompt');
+    const projectId = dramaViewState.projectId;
+    const shotId = dramaViewState.shotId;
+    if (!button || !projectId || !shotId) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const title = document.querySelector<HTMLInputElement>('#drama-shot-title')?.value || '';
+    const originalText = document.querySelector<HTMLTextAreaElement>('#drama-shot-original')?.value || '';
+    const idleText = button.textContent || '✣ 生成提示词';
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    void (async () => {
+      const saveResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shotId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, original_text: originalText }),
+      });
+      if (!saveResponse.ok) throw new Error(await responseDetail(saveResponse));
+      const taskResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shotId}/prompt`, { method: 'POST' });
+      if (!taskResponse.ok) throw new Error(await responseDetail(taskResponse));
+      runtime.notify('分镜提示词任务已创建，正按当前剧本匹配已生成参考图');
+      await runtime.reloadProject(projectId);
+    })().catch(error => {
+      console.error(error);
+      button.disabled = false;
+      button.textContent = idleText;
+      runtime.notify(`提示词生成失败：${error instanceof Error ? error.message : '请重试'}`);
+    }).finally(() => button.removeAttribute('aria-busy'));
   }, true);
 }

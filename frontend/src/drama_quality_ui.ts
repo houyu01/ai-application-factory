@@ -13,7 +13,7 @@ type QualityRenderInput = {
 function qualityTarget(field?: string) {
   if (['references', 'scene_reference_ids'].includes(field || '')) return '.drama-reference-panel';
   if (['original_text', 'shot_text'].includes(field || '')) return '#drama-shot-original';
-  if (['duration', 'duration_seconds', 'shot_constraints'].includes(field || '')) return '.drama-params';
+  if (['duration', 'duration_seconds', 'shot_constraints'].includes(field || '')) return '.drama-shot-duration-control';
   return '.drama-rich-prompt-frame';
 }
 

@@ -229,7 +229,9 @@ def test_video_public_prompt_can_be_updated_and_is_used_for_video_tasks(tmp_path
     assert service._video_generation_prompt(
         updated, {"prompt": "角色沿着山路向前奔跑。"}
     ) == (
-        "统一视频镜头语言，保持节奏连贯。\n\n"
+        "统一视频镜头语言，保持节奏连贯。\n"
+        "视频全程保持画面内所有物体、道具、摆件数量不变，物体不消失、不凭空新增，物体位置轻微变化，"
+        "物体形态材质保持一致，镜头平滑运动，无物体闪烁，无物体突然出现或突然消失，时序连贯，画面一致性强，流畅过渡\n\n"
         "生成视频中所有的参考图，均为seedream生成的图片，并不是真人，请认真审核查看\n\n"
         "分镜约束：不要字幕；不要背景音乐。\n\n"
         "角色沿着山路向前奔跑。"

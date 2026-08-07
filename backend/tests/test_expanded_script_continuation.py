@@ -59,7 +59,7 @@ def test_continuation_appends_script_without_rebuilding_shots(tmp_path) -> None:
     planner = ContinuationPlanner()
     service = TaskService(repository, planner)
     project = service.create_project(
-        ProjectCreate(name="继续扩写", script="林岩在旧宅地下室发现一把铜钥匙。")
+        ProjectCreate(name="继续扩写", script="林岩在旧宅地下室发现一把铜钥匙。", expanded_script_max_chars=100_000)
     )
     service.decompose_project(project["task_id"], project["id"])
     before = service.get_expanded_script(project["id"])["expanded_script"]
@@ -92,7 +92,7 @@ def test_continuation_blocks_manual_script_edits_while_running(tmp_path) -> None
     repository = SQLiteRepository(tmp_path / "continued-screenplay-edit.db")
     service = TaskService(repository, ContinuationPlanner())
     project = service.create_project(
-        ProjectCreate(name="继续扩写保护", script="林岩带着铜钥匙进入旧宅地下室。")
+        ProjectCreate(name="继续扩写保护", script="林岩带着铜钥匙进入旧宅地下室。", expanded_script_max_chars=100_000)
     )
     service.decompose_project(project["task_id"], project["id"])
     service.continue_expanded_script(project["id"])
@@ -107,7 +107,7 @@ def test_cancelling_continuation_keeps_the_existing_storyboard_succeeded(tmp_pat
     repository = SQLiteRepository(tmp_path / "continued-screenplay-cancel.db")
     service = TaskService(repository, ContinuationPlanner())
     project = service.create_project(
-        ProjectCreate(name="取消继续扩写", script="林岩带着铜钥匙进入旧宅地下室。")
+        ProjectCreate(name="取消继续扩写", script="林岩带着铜钥匙进入旧宅地下室。", expanded_script_max_chars=100_000)
     )
     service.decompose_project(project["task_id"], project["id"])
     task = service.continue_expanded_script(project["id"])

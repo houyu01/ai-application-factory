@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .agents.drama_agent import DramaAgent
@@ -44,13 +45,21 @@ class ScriptPlanner(
     def configure(self, options: dict[str, Any] | None = None) -> None:
         self.options = {**self.options, **(options or {})}
 
-    def plan(self, script: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    def plan(
+        self,
+        script: str,
+        options: dict[str, Any] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Create a storyboard plan while allowing the durable worker to stop it."""
+
+        self._raise_if_expansion_cancelled(is_cancelled)
         runtime = {**self.options, **(options or {})}
         agent = self._agent(runtime, script)
         if self._is_long_form_screenplay(script, runtime):
             if agent is None:
                 return self._fallback_long_form_plan(script, runtime)
-            return self._plan_long_form(script, runtime, agent)
+            return self._plan_long_form(script, runtime, agent, is_cancelled=is_cancelled)
         if agent is None:
             return self._fallback_plan(script, runtime)
 
@@ -63,8 +72,10 @@ class ScriptPlanner(
                 "ratio": runtime.get("ratio", "9:16"),
                 "resolution": runtime.get("resolution", "720p"),
                 "shot_constraints": runtime.get("shot_constraints", {}),
+                "shot_script_max_chars": self._shot_script_char_limit(runtime),
             },
         )
+        self._raise_if_expansion_cancelled(is_cancelled)
         asset_skill_context = {
             asset_type: agent.execute_skill(
                 "asset_prompt_generator",
@@ -78,17 +89,23 @@ class ScriptPlanner(
             )
             for asset_type in ("character", "scene", "prop")
         }
-        response = agent.completion(
-            [
-                {
-                    "role": "user",
-                    "content": self._decomposition_prompt(
-                        script, runtime, skill_context, asset_skill_context
-                    ),
-                }
-            ],
-            model=runtime.get("model"),
-            tools=WEB_SEARCH_TOOLS,
+        self._raise_if_expansion_cancelled(is_cancelled)
+        messages = [{
+            "role": "user",
+            "content": self._decomposition_prompt(
+                script, runtime, skill_context, asset_skill_context
+            ),
+        }]
+        response = (
+            self._stream_completion_with_retry(
+                agent, "分镜拆解", messages, runtime, lambda _delta: None,
+                tools=WEB_SEARCH_TOOLS, is_cancelled=is_cancelled,
+            )
+            if is_cancelled
+            else agent.completion(
+                messages, model=runtime.get("model"), tools=WEB_SEARCH_TOOLS,
+            )
         )
+        self._raise_if_expansion_cancelled(is_cancelled)
         parsed = self._parse_json(response)
         return self._normalize_plan(parsed, script, runtime)

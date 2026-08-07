@@ -29,39 +29,18 @@ class FakeResponse:
         return json.dumps(self.payload).encode()
 
 
-def test_dashscope_client_uses_async_header_and_happyhorse_first_frame() -> None:
-    """DashScope must never call HappyHorse synchronously or with Ark payloads."""
-
-    requests = []
-    calls = []
-
-    def opener(request, data=None, timeout=None):
-        requests.append(request)
-        calls.append((data, timeout))
-        return FakeResponse({"output": {"task_id": "dash-task", "task_status": "PENDING"}})
+def test_dashscope_client_rejects_happyhorse_first_frame_models() -> None:
+    """DashScope image-to-video models cannot silently use native first frames."""
 
     client = DashScopeVideoClient(
-        api_key="dash-key", model="happyhorse-1.1-i2v", opener=opener
-    )
-    task = client.create_video_task(
-        "一只猫在草地上奔跑",
-        resolution="720p",
-        seconds=5,
-        reference_images=["https://cdn.example/first.png", "https://cdn.example/ignored.png"],
+        api_key="dash-key", model="happyhorse-1.1-i2v"
     )
 
-    assert task["provider_task_id"] == "dash-task"
-    assert calls == [(None, 90)]
-    assert requests[0].full_url == DashScopeVideoClient.DEFAULT_CREATE_URL
-    assert requests[0].get_header("X-dashscope-async") == "enable"
-    assert json.loads(requests[0].data) == {
-        "model": "happyhorse-1.1-i2v",
-        "input": {
-            "prompt": "一只猫在草地上奔跑",
-            "media": [{"type": "first_frame", "url": "https://cdn.example/first.png"}],
-        },
-        "parameters": {"resolution": "720P", "duration": 5},
-    }
+    with pytest.raises(ValueError, match="不使用该模式"):
+        client.create_video_task(
+            "一只猫在草地上奔跑",
+            reference_images=["https://cdn.example/first.png"],
+        )
 
 
 def test_dashscope_client_sends_all_happyhorse_reference_images() -> None:
@@ -86,6 +65,7 @@ def test_dashscope_client_sends_all_happyhorse_reference_images() -> None:
         reference_images=[
             "https://cdn.example/character.png",
             "https://cdn.example/fan.png",
+            "https://cdn.example/character.png",
         ],
     )
 
@@ -100,14 +80,49 @@ def test_dashscope_client_sends_all_happyhorse_reference_images() -> None:
         },
         "parameters": {"resolution": "720P", "ratio": "16:9", "duration": 5},
     }
+    assert "first_frame" not in requests[0].data.decode()
 
 
-def test_dashscope_client_parses_task_result_and_requires_happyhorse_frame() -> None:
+def test_dashscope_client_sends_wan_r2v_reference_images() -> None:
+    """The configured Wan R2V snapshot uses its reference-image protocol."""
+
+    requests = []
+
+    def opener(request, data=None, timeout=None):
+        assert data is None
+        assert timeout == 90
+        requests.append(request)
+        return FakeResponse({"output": {"task_id": "dash-task", "task_status": "PENDING"}})
+
+    client = DashScopeVideoClient(
+        api_key="dash-key", model="wan2.7-r2v-2026-06-12", opener=opener
+    )
+    client.create_video_task(
+        "@图1 中的角色走进 @图2 中的庭院。",
+        ratio="9:16",
+        resolution="720p",
+        seconds=5,
+        reference_images=[
+            "https://cdn.example/character.png",
+            "https://cdn.example/courtyard.png",
+        ],
+    )
+
+    assert json.loads(requests[0].data) == {
+        "model": "wan2.7-r2v-2026-06-12",
+        "input": {
+            "prompt": "图1 中的角色走进 图2 中的庭院。",
+            "media": [
+                {"type": "reference_image", "url": "https://cdn.example/character.png"},
+                {"type": "reference_image", "url": "https://cdn.example/courtyard.png"},
+            ],
+        },
+        "parameters": {"resolution": "720P", "ratio": "9:16", "duration": 5},
+    }
+
+
+def test_dashscope_client_parses_task_result_and_requires_happyhorse_references() -> None:
     """A DashScope provider result becomes a successful durable video URL."""
-
-    client = DashScopeVideoClient(api_key="dash-key", model="happyhorse-1.1-i2v")
-    with pytest.raises(ValueError, match="首帧参考图"):
-        client.create_video_task("测试视频")
 
     reference_client = DashScopeVideoClient(
         api_key="dash-key", model="happyhorse-1.1-r2v"
@@ -122,10 +137,10 @@ def test_dashscope_client_parses_task_result_and_requires_happyhorse_frame() -> 
             "results": {"video_url": "https://cdn.example/dashscope.mp4"},
         }
     }
-    assert client._read_status(result) == "succeeded"
-    assert client._read_progress(result) == 100
-    assert client._read_video_url(result) == "https://cdn.example/dashscope.mp4"
-    assert client._read_video_url({
+    assert reference_client._read_status(result) == "succeeded"
+    assert reference_client._read_progress(result) == 100
+    assert reference_client._read_video_url(result) == "https://cdn.example/dashscope.mp4"
+    assert reference_client._read_video_url({
         "output": {"video_url": "https://cdn.example/dashscope-direct.mp4"}
     }) == "https://cdn.example/dashscope-direct.mp4"
 
@@ -156,7 +171,7 @@ def test_tencent_mps_client_signs_create_and_parses_polled_video() -> None:
         secret_id="secret-id",
         secret_key="secret-key",
         region="ap-guangzhou",
-        model="Hunyuan:1.5",
+        model="Vidu:q3",
         opener=opener,
     )
     created = client.create_video_task(
@@ -164,7 +179,11 @@ def test_tencent_mps_client_signs_create_and_parses_polled_video() -> None:
         ratio="9:16",
         resolution="720p",
         seconds=5,
-        reference_images=["https://cdn.example/first.png"],
+        reference_images=[
+            "https://cdn.example/character.png",
+            "https://cdn.example/scene.png",
+            "https://cdn.example/character.png",
+        ],
     )
     result = client.get_video_task(created["provider_task_id"])
 
@@ -173,15 +192,32 @@ def test_tencent_mps_client_signs_create_and_parses_polled_video() -> None:
     assert requests[0].get_header("Authorization").startswith("TC3-HMAC-SHA256 Credential=secret-id/")
     assert requests[0].get_header("X-tc-action") == "CreateAigcVideoTask"
     assert json.loads(requests[0].data) == {
-        "ModelName": "Hunyuan",
-        "ModelVersion": "1.5",
+        "ModelName": "Vidu",
+        "ModelVersion": "q3",
         "Prompt": "一只猫在草地上奔跑",
         "Duration": 5,
         "ExtraParameters": {"Resolution": "720P", "AspectRatio": "9:16"},
-        "ImageUrl": "https://cdn.example/first.png",
+        "ImageInfos": [
+            {"ImageUrl": "https://cdn.example/character.png"},
+            {"ImageUrl": "https://cdn.example/scene.png"},
+        ],
     }
     assert TencentMpsVideoClient._read_status(result) == "succeeded"
     assert TencentMpsVideoClient._read_video_url(result) == "https://cdn.example/tencent.mp4"
+
+
+def test_tencent_client_rejects_native_first_frame_fallback() -> None:
+    """Tencent models without multi-image references must not receive ImageUrl."""
+
+    client = TencentMpsVideoClient(
+        secret_id="secret-id", secret_key="secret-key", model="Hunyuan:1.5"
+    )
+
+    with pytest.raises(ValueError, match="不使用该模式"):
+        client.create_video_task(
+            "一只猫在草地上奔跑",
+            reference_images=["https://cdn.example/first.png"],
+        )
 
 
 def test_video_provider_config_selects_dashscope_or_tencent_without_secret_leaks(tmp_path) -> None:
@@ -214,8 +250,14 @@ def test_video_provider_config_selects_dashscope_or_tencent_without_secret_leaks
     assert isinstance(service._video_task_client({"model": "Hunyuan:1.5"}), TencentMpsVideoClient)
 
 
-def test_dashscope_probe_uses_the_required_reference_and_supported_resolution(tmp_path, monkeypatch) -> None:
-    """Saving a HappyHorse R2V configuration probes through its asynchronous contract."""
+@pytest.mark.parametrize(
+    "model",
+    ["happyhorse-1.1-r2v", "wan2.7-r2v-2026-06-12"],
+)
+def test_dashscope_r2v_probe_uses_required_reference_and_supported_resolution(
+    tmp_path, monkeypatch, model
+) -> None:
+    """Each DashScope R2V configuration probes with its mandatory reference image."""
 
     service = TaskService(SQLiteRepository(tmp_path / "dashscope-probe.db"), object())
     submitted: dict[str, object] = {}
@@ -233,9 +275,9 @@ def test_dashscope_probe_uses_the_required_reference_and_supported_resolution(tm
 
     monkeypatch.setattr(service, "_video_task_client", lambda _config: ProbeClient())
     service._probe_video(
-        {"provider": "dashscope", "model": "happyhorse-1.1-r2v"},
+        {"provider": "dashscope", "model": model},
         "dash-key",
-        "happyhorse-1.1-r2v",
+        model,
     )
 
     assert submitted["resolution"] == "720p"

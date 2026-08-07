@@ -96,3 +96,23 @@ def test_cloud_request_origin_is_forwarded_to_durable_video_task(monkeypatch) ->
 
     assert response.status_code == 202
     assert captured["base_url"] == "https://studio.example.com"
+
+
+def test_generate_shot_video_returns_reference_selection_warning(monkeypatch) -> None:
+    """The editor must receive a Wan reference-limit warning with its new task."""
+
+    monkeypatch.setattr(
+        router.task_service,
+        "enqueue",
+        lambda *_args, **_kwargs: {
+            "id": "video-task-warning", "type": "shot_video", "status": "生成中",
+            "project_id": "project-4", "resource_id": "shot-4",
+            "created_at": "2026-08-04T00:00:00Z", "progress": 0, "stage": "",
+            "warning_message": "由于选择的模型限制，目前只选用了首尾帧 + 3个参考图，后续的2张参考图未使用，请手动调整。",
+        },
+    )
+
+    response = TestClient(app).post("/api/projects/project-4/shots/shot-4/video")
+
+    assert response.status_code == 202
+    assert response.json()["warning_message"].startswith("由于选择的模型限制")

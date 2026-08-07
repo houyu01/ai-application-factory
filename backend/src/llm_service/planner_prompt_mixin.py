@@ -10,6 +10,7 @@ from typing import Any
 
 from .agents.drama_agent import DramaAgent
 from .client.openai_client import OpenAICLient, OpenAIClientBaseOptions
+from .shot_reference_matcher import ShotReferenceMatcher
 
 
 def _script_planner():
@@ -238,6 +239,36 @@ class ScriptPlannerPromptMixin:
         return normalized
 
     @staticmethod
+    def select_ready_shot_reference_assets(
+        shot: dict[str, Any], assets: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Select generated material images that semantically match the current shot script."""
+
+        return ShotReferenceMatcher.select(shot, assets)
+
+    @staticmethod
+    def ensure_shot_references(
+        nodes: list[dict[str, Any]], assets: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Append missing automatic matches so each selected image is cited in the prompt."""
+
+        referenced_ids = {
+            str(node.get("asset_id") or "")
+            for node in nodes
+            if isinstance(node, dict) and node.get("type") == "reference"
+        }
+        missing = [asset for asset in assets if str(asset.get("id") or "") not in referenced_ids]
+        if not missing:
+            return nodes
+        appended: list[dict[str, Any]] = [{"type": "text", "text": "\n自动匹配参考图："}]
+        for index, asset in enumerate(missing):
+            if index:
+                appended.append({"type": "text", "text": "、"})
+            appended.append(_script_planner()._reference_node(asset))
+        appended.append({"type": "text", "text": "\n"})
+        return _script_planner()._normalize_rich_prompt([*nodes, *appended], assets)
+
+    @staticmethod
     def _remove_disallowed_subtitle_sections(
         nodes: list[dict[str, Any]], subtitles_enabled: bool
     ) -> list[dict[str, Any]]:
@@ -372,13 +403,13 @@ class ScriptPlannerPromptMixin:
                         "根据以下 Skill 执行结果生成分镜富文本 Prompt。只返回合法 JSON，不要 Markdown。\n"
                         "格式必须是：{\"nodes\":[{\"type\":\"text\",\"text\":\"...\"},"
                         "{\"type\":\"reference\",\"asset_id\":\"素材 catalog 中的 asset_id\","
-                        "\"asset_type\":\"character|scene|prop\",\"label\":\"素材名称\"}]}。\n"
+                        "\"asset_type\":\"character|scene|prop|placeholder\",\"label\":\"素材名称\"}]}。\n"
                         "文字必须严格按以下顺序组织：场景、角色、风格、光线、位置、"
                         f"{'一个连续长镜头' if template_version == 'v2' else '2～3个连续镜头'}、每个镜头对应的配音；"
                         "每个镜头必须使用‘【镜头N | 时长Xs | 时间：日 外】’开头，并在镜头后紧跟‘【配音：旁白｜VoiceID：...｜状态：...｜情绪：...｜语气特点：...｜台词：...】’；"
                         "场景、角色和道具引用必须放在对应段落以及实际动作发生的位置；"
                         "需要使用图片的地方必须输出 reference 节点，不能把图片 URL 写进文字。"
-                        "reference 节点只能引用已保存素材 catalog 中存在的 asset_id，禁止虚构素材。\n"
+                        "候选 catalog 只包含当前剧本匹配且已生成图片的素材；每项候选素材都必须输出 reference 引用，禁止虚构素材。\n"
                         f"{'需要输出字幕内容。' if subtitles_enabled else '项目不要字幕：不要输出字幕段落、字幕说明、字幕标记或“不要字幕”文字；保留配音内容。'}\n"
                         f"{'需要输出背景音乐说明。' if background_music_enabled else '项目不要音乐：不要输出背景音乐、配乐、BGM 段落或“不要背景音乐”文字；保留配音、音效与环境音。'}\n"
                         f"Skill：{json.dumps(skill_context, ensure_ascii=False)}\n"

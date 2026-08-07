@@ -1,11 +1,12 @@
 /** Block video generation until the selected shot's prompt and references are usable. */
 import type { ApiProject, DramaShot, GenerationTask } from './models.js';
+import { dramaShotVideoGenerationCount } from './drama_shot_duration_ui.js';
 
 type VideoPreflightRuntime = {
   apiBaseUrl: string;
   getActiveProject: () => ApiProject | null;
   getSelectedShot: (project: ApiProject) => DramaShot | undefined;
-  onTaskCreated: (project: ApiProject, task: GenerationTask) => void;
+  onTasksCreated: (project: ApiProject, tasks: GenerationTask[]) => void;
   toast: (message: string) => void;
 };
 
@@ -90,18 +91,28 @@ async function responseDetail(response: Response) {
   return body.detail || `HTTP ${response.status}`;
 }
 
-async function createVideoTask(project: ApiProject, shot: DramaShot, button: HTMLButtonElement) {
+async function createVideoTasks(project: ApiProject, shot: DramaShot, button: HTMLButtonElement) {
   if (!runtime) return;
+  const count = dramaShotVideoGenerationCount(shot.id);
   try {
     const response = await fetch(
-      `${runtime.apiBaseUrl}/projects/${encodeURIComponent(project.id)}/shots/${encodeURIComponent(shot.id)}/video`,
-      { method: 'POST' },
+      `${runtime.apiBaseUrl}/projects/${encodeURIComponent(project.id)}/shots/${encodeURIComponent(shot.id)}/videos`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      },
     );
     if (!response.ok) throw new Error(await responseDetail(response));
-    const task = await response.json() as GenerationTask;
-    addPendingVideoVersion(shot, task);
-    runtime.onTaskCreated(project, task);
-    runtime.toast('分镜视频任务已创建');
+    const payload = await response.json() as { tasks?: GenerationTask[] };
+    const tasks = payload.tasks || [];
+    if (!tasks.length) throw new Error('未创建视频任务，请稍后重试。');
+    tasks.forEach(task => addPendingVideoVersion(shot, task));
+    runtime.onTasksCreated(project, tasks);
+    runtime.toast(`已创建 ${tasks.length} 个分镜视频任务`);
+    const warnings = tasks.map(task => task.warning_message?.trim())
+      .filter((message): message is string => Boolean(message));
+    [...new Set(warnings)].forEach(message => runtime?.toast(message));
   } catch (error) {
     resetButton(button);
     const message = error instanceof Error ? error.message : '视频任务创建失败，请稍后重试。';
@@ -132,5 +143,5 @@ document.addEventListener('click', event => {
   if (hasBoundaryFrames(shot)) {
     runtime?.toast('首尾帧会与当前参考图一并发送，并由提示词约束视频的起止画面。');
   }
-  void createVideoTask(project, shot, button);
+  void createVideoTasks(project, shot, button);
 }, true);

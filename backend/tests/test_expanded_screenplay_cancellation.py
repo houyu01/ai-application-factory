@@ -77,6 +77,8 @@ def test_cancelling_expansion_closes_stream_and_releases_worker(tmp_path) -> Non
     assert saved_task["status"] == GenerationStatus.CANCELLED.value
     assert saved_task["poll_lease_token"] is None
     assert saved_task["poll_lease_until"] is None
+    assert project["id"] not in repository.project_generation_queue()
+    assert repository.claim_next_runnable_task() is None
     assert service.get_project(project["id"])["status"] == GenerationStatus.CANCELLED.value
 
 
@@ -99,3 +101,25 @@ def test_cancelling_a_failed_expansion_confirms_it_is_already_stopped(tmp_path) 
     assert task["status"] == GenerationStatus.FAILED.value
     assert screenplay["expanded_script_generating"] is False
     assert screenplay["expanded_script_cancellable"] is False
+
+
+def test_cancelling_storyboard_decomposition_is_available_from_script_dialog(tmp_path) -> None:
+    """The script dialog must stop the bootstrap task after expansion completes."""
+
+    repository = SQLiteRepository(tmp_path / "cancel-decomposition.db")
+    service = TaskService(repository, ScriptPlanner())
+    project = service.create_project(
+        ProjectCreate(name="取消拆解", script="林岩独自进入荒废旧宅寻找铜钥匙。")
+    )
+    repository.update_task_progress(
+        project["task_id"], progress=65, stage="正在拆解扩写剧本"
+    )
+
+    screenplay = service.get_expanded_script(project["id"])
+    cancelled = service.cancel_script_decomposition(project["id"])
+
+    assert screenplay["expanded_script_generating"] is True
+    assert screenplay["expanded_script_cancellable"] is True
+    assert screenplay["expanded_script_cancel_label"] == "取消生成"
+    assert cancelled["status"] == GenerationStatus.CANCELLED.value
+    assert project["id"] not in repository.project_generation_queue()

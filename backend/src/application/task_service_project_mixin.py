@@ -157,6 +157,7 @@ class TaskServiceProjectMixin:
         """
 
         shots: list[dict[str, Any]] = []
+        shot_script_max_chars = max(1, int(project.get("shot_script_max_chars") or 400))
         for episode_index, episode in enumerate(episodes, start=1):
             episode_name = episode.get("name", "第1集")
             for index, shot in enumerate(episode.get("shots", []), start=1):
@@ -168,7 +169,7 @@ class TaskServiceProjectMixin:
                     "episode_index": episode_index,
                     "episode_name": episode_name,
                     "shot_index": index,
-                    "original_text": original_text,
+                    "original_text": str(original_text)[:shot_script_max_chars],
                     "duration_seconds": shot.get("duration_seconds", shot.get("duration", 10)),
                 }
                 prompt_rich = ScriptPlanner._fallback_shot_prompt_rich(project, draft, assets)
@@ -177,11 +178,11 @@ class TaskServiceProjectMixin:
                         **draft,
                         "prompt": ScriptPlanner.rich_prompt_to_text(prompt_rich),
                         "prompt_rich": prompt_rich,
-                        "reference_asset_ids": [
+                        "reference_asset_ids": list(dict.fromkeys(
                             str(node.get("asset_id"))
                             for node in prompt_rich
                             if node.get("type") == "reference" and node.get("asset_id")
-                        ],
+                        )),
                         "status": GenerationStatus.NOT_GENERATED.value,
                         "historical_videos": [],
                     }
@@ -291,6 +292,7 @@ class TaskServiceProjectMixin:
     def enqueue(
         self, kind: str, project_id: str, resource_id: str,
         public_media_base_url: str | None = None,
+        allow_parallel: bool = False,
     ) -> dict[str, Any]:
         project = self.repository.get_drama(project_id)
         if project is None:
@@ -300,9 +302,10 @@ class TaskServiceProjectMixin:
         if kind in {"shot_prompt", "shot_video", "shot_quality"} and self.repository.get_shot(project_id, resource_id) is None:
             raise KeyError(f"Shot not found: {resource_id}")
         active_task = self.repository.get_active_task(project_id, kind, resource_id)
-        if active_task is not None:
+        if active_task is not None and not allow_parallel:
             return {**active_task, "_reused": True}
         shot_version = None
+        reference_selection = None
         if kind == "shot_video":
             shot = self.repository.get_shot(project_id, resource_id)
             preflight_issues = self._video_generation_preflight_issues(
@@ -323,6 +326,10 @@ class TaskServiceProjectMixin:
                     "暂不能生成视频，请先完成以下准备：\n- "
                     + "\n- ".join(preflight_issues)
                 )
+            reference_selection = self._video_reference_selection(
+                project, shot or {}, self._provider_options(project, "video"),
+                public_media_base_url,
+            )
             shot_version = self.repository.create_shot_version(
                 project_id,
                 resource_id,
@@ -339,6 +346,8 @@ class TaskServiceProjectMixin:
         }
         if kind == "shot_video" and public_media_base_url:
             input_snapshot["public_media_base_url"] = public_media_base_url
+        if reference_selection is not None:
+            input_snapshot["video_reference_selection"] = reference_selection
         if kind == "shot_prompt":
             shot = self.repository.get_shot(project_id, resource_id)
             input_snapshot["prompt_template_version"] = str(
@@ -364,10 +373,13 @@ class TaskServiceProjectMixin:
                 resource_id,
                 status=GenerationStatus.GENERATING,
             )
-        return {
+        result = {
             **self.repository.update_task_status(task["id"], GenerationStatus.GENERATING),
             "_reused": False,
         }
+        if reference_selection is not None:
+            result["warning_message"] = reference_selection["warning_message"]
+        return result
 
     def list_projects(self) -> list[dict[str, Any]]:
         return self.repository.list_dramas()

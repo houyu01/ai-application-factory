@@ -180,7 +180,7 @@ def test_generate_video_polls_and_downloads_provider_content():
     assert sync_client.videos.download_requests == [("video_1", "video")]
 
 
-def test_generate_video_passes_first_rich_prompt_reference_to_openai():
+def test_generate_video_passes_a_rich_prompt_reference_to_openai():
     sync_client = FakeSyncClient([])
     sync_client.videos = FakeVideos()
     client = make_client(sync_client=sync_client)

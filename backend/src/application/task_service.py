@@ -22,8 +22,9 @@ from .task_service_retry_mixin import TaskServiceRetryMixin
 from .task_service_video_cancellation_mixin import TaskServiceVideoCancellationMixin
 from .task_service_video_validation_mixin import TaskServiceVideoValidationMixin
 from .task_service_video_provider_mixin import TaskServiceVideoProviderMixin
+from .task_service_video_enqueue_mixin import TaskServiceVideoEnqueueMixin
 
-class TaskService(TaskServiceDetailMixin, TaskServiceExpansionMixin, TaskServiceDecompositionMixin, TaskServiceRetryMixin, TaskServiceVideoCancellationMixin, TaskServiceVideoValidationMixin, TaskServiceAssetCancellationMixin, TaskServiceAssetBatchMixin, TaskServiceProjectMixin, TaskServiceAssetMixin, TaskServiceWorkerMixin, TaskServiceModelSettingsMixin, TaskServiceMediaProviderMixin, TaskServiceVideoProviderMixin, TaskServiceProviderMixin, TaskServiceModelProbeMixin, TaskServicePromptMixin, TaskServiceCoverMixin):
+class TaskService(TaskServiceDetailMixin, TaskServiceExpansionMixin, TaskServiceDecompositionMixin, TaskServiceRetryMixin, TaskServiceVideoEnqueueMixin, TaskServiceVideoCancellationMixin, TaskServiceVideoValidationMixin, TaskServiceAssetCancellationMixin, TaskServiceAssetBatchMixin, TaskServiceProjectMixin, TaskServiceAssetMixin, TaskServiceWorkerMixin, TaskServiceModelSettingsMixin, TaskServiceMediaProviderMixin, TaskServiceVideoProviderMixin, TaskServiceProviderMixin, TaskServiceModelProbeMixin, TaskServicePromptMixin, TaskServiceCoverMixin):
     """Coordinate durable short-drama project and generation workflows.
 
     FastAPI gateways call this facade after project, asset, prompt, quality, or

@@ -27,8 +27,8 @@ class ScriptPlannerExpansionMixin:
     request mixin, while this class owns progression and checkpoints.
     """
 
-    EXPANDED_SCRIPT_TARGET_CHARS = 50_000
-    EXPANDED_SCRIPT_MAX_CHARS = 100_000
+    EXPANDED_SCRIPT_TARGET_CHARS = 5_000
+    EXPANDED_SCRIPT_MAX_CHARS = 10_000
     EXPANDED_SCRIPT_CHUNK_CHARS = 6_000
     EXPANDED_SCRIPT_MAX_CHUNKS = 30
     EXPANDED_SCRIPT_MAX_RETRIES = 3

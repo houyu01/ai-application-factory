@@ -150,7 +150,11 @@ def test_ark_video_create_task_sends_prompt_and_reference_images():
         ratio="9:16",
         resolution="720p",
         seconds=8,
-        reference_images=["https://cdn.example/character.png", "https://cdn.example/scene.png"],
+        reference_images=[
+            "https://cdn.example/character.png",
+            "https://cdn.example/scene.png",
+            "https://cdn.example/character.png",
+        ],
     )
 
     assert result["provider_task_id"] == "task-with-references"

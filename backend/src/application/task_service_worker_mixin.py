@@ -36,13 +36,13 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
     ) -> None:
         if self._video_task_cancelled(str(task["id"])):
             return
-        self.repository.update_shot(project_id, shot_id, status=GenerationStatus.FAILED)
         self.repository.update_task_status(
             task["id"], GenerationStatus.FAILED, error_message=message
         )
         self._update_shot_version_progress(
             task, status=GenerationStatus.FAILED, error_message=message
         )
+        self.sync_shot_video_status(project_id, shot_id, GenerationStatus.FAILED)
 
     def _video_task_cancelled(self, task_id: str) -> bool:
         """Avoid letting an in-flight worker overwrite a creator cancellation."""
@@ -104,7 +104,8 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
                 return
             try:
                 prompt, reference_images = self._video_generation_inputs(
-                    project, shot, public_media_base_url
+                    project, shot, public_media_base_url,
+                    reference_limit=self._wan_reference_image_limit(options),
                 )
                 created = client.create_video_task(
                     prompt,
@@ -332,14 +333,10 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
                 progress=100,
                 video_url=resolved_video_url,
             )
+            self.sync_shot_video_status(project_id, shot_id, GenerationStatus.SUCCEEDED)
         except Exception as exc:
             if self._video_task_cancelled(task_id):
                 return
-            self.repository.update_shot(
-                project_id,
-                shot_id,
-                status=GenerationStatus.FAILED,
-            )
             self.repository.update_task_status(
                 task_id, GenerationStatus.FAILED, error_message=str(exc)
             )
@@ -348,6 +345,7 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
                 status=GenerationStatus.FAILED,
                 error_message=str(exc),
             )
+            self.sync_shot_video_status(project_id, shot_id, GenerationStatus.FAILED)
 
     def run_shot_prompt(self, task_id: str, project_id: str, shot_id: str) -> None:
         try:
@@ -356,6 +354,9 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
             if shot is None:
                 raise KeyError(f"Shot not found: {shot_id}")
             assets = self._assets_with_voice_details(project.get("assets", []))
+            reference_assets = ScriptPlanner.select_ready_shot_reference_assets(
+                shot, assets
+            )
             task = self.repository.get_task(task_id) or {}
             task_snapshot = task.get("input_snapshot") or {}
             template_version = str(
@@ -377,15 +378,19 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
                 prompt_rich = self.planner.generate_shot_prompt_rich(
                     project,
                     shot,
-                    assets,
+                    reference_assets,
                     options=prompt_options,
                 )
                 prompt = ScriptPlanner.rich_prompt_to_text(prompt_rich)
             else:
                 prompt = ScriptPlanner._fallback_shot_prompt(
-                    project, shot, assets
+                    project, shot, reference_assets
                 )
                 prompt_rich = [{"type": "text", "text": prompt}]
+            prompt_rich = ScriptPlanner.ensure_shot_references(
+                prompt_rich, reference_assets
+            )
+            prompt = ScriptPlanner.rich_prompt_to_text(prompt_rich)
             updated = self.repository.update_shot(
                 project_id,
                 shot_id,
@@ -394,13 +399,13 @@ class TaskServiceWorkerMixin(TaskServiceQualityWorkerMixin):
                 structured=self._structured_from_prompt(project, shot, prompt_rich),
                 quality_status="未检查",
                 quality_issues=[],
-                reference_asset_ids=[
+                reference_asset_ids=list(dict.fromkeys(
                     str(node.get("asset_id"))
                     for node in prompt_rich
                     if isinstance(node, dict)
                     and node.get("type") == "reference"
                     and node.get("asset_id")
-                ],
+                )),
                 prompt_template_id=template.get("id") if template else None,
                 prompt_template_version=template.get("version", "v1") if template else "v1",
                 status=GenerationStatus.NOT_GENERATED,

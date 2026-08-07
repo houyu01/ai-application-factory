@@ -24,12 +24,18 @@ class TencentMpsVideoClient:
     """Call Tencent MPS AIGC video APIs with TC3-HMAC-SHA256 authentication.
 
     The selected Tencent video provider uses this client from durable task
-    workers. It owns request signing, first-frame input conversion, task
+    workers. It owns request signing, reference-image payload conversion, task
     polling, and immediate persistence of the short-lived result URL.
     """
 
     DEFAULT_ENDPOINT = "https://mps.tencentcloudapi.com"
     VERSION = "2019-06-12"
+    REFERENCE_IMAGE_MODELS = {
+        "vidu": {"q2", "q2-pro", "q3-turbo", "q3", "q3-mix"},
+        "kling": {"1.6", "o1", "3.0-omni"},
+        "pixverse": {"v5.6", "v6", "c1"},
+        "h2": {"1.0"},
+    }
 
     def __init__(
         self,
@@ -59,7 +65,7 @@ class TencentMpsVideoClient:
         seconds: int = 8,
         reference_images: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Submit a Tencent MPS AIGC video task using the first reference image."""
+        """Submit a Tencent MPS task with its multi-image reference protocol."""
 
         model_name, model_version = self._model_parts()
         payload: dict[str, Any] = {
@@ -73,9 +79,14 @@ class TencentMpsVideoClient:
         }
         if model_version:
             payload["ModelVersion"] = model_version
-        images = [str(image) for image in reference_images or [] if image]
+        images = list(dict.fromkeys(str(image) for image in reference_images or [] if image))
         if images:
-            payload["ImageUrl"] = images[0]
+            if not self._supports_reference_images(model_name, model_version):
+                raise ValueError(
+                    f"腾讯云模型“{self.model}”只支持接口原生首帧图，"
+                    "本应用不使用该模式。请改用支持多图参考的 Vidu、Kling、PixVerse 或 H2 模型。"
+                )
+            payload["ImageInfos"] = [{"ImageUrl": image} for image in images]
         response = self._request("CreateAigcVideoTask", payload)
         task_id = self._response(response).get("TaskId")
         if not isinstance(task_id, str) or not task_id:
@@ -108,6 +119,14 @@ class TencentMpsVideoClient:
                 name, version = self.model.split(separator, 1)
                 return name.strip() or "Hunyuan", version.strip()
         return self.model.strip() or "Hunyuan", ""
+
+    @classmethod
+    def _supports_reference_images(cls, model_name: str, model_version: str) -> bool:
+        """Return whether Tencent documents multi-image references for this model."""
+
+        return model_version.lower() in cls.REFERENCE_IMAGE_MODELS.get(
+            model_name.lower(), set()
+        )
 
     def _request(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
