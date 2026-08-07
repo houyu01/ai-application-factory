@@ -20,6 +20,32 @@ class ScriptPlannerUtilsMixin:
     """Behavior slice of _script_planner()."""
 
     @staticmethod
+    def _shot_script_char_limit(runtime: dict[str, Any] | None = None) -> int:
+        """Resolve the persisted character ceiling for a storyboard source segment."""
+
+        try:
+            limit = int((runtime or {}).get("shot_script_max_chars", 400))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("每个分镜剧本文字上限必须是整数") from exc
+        if not 1 <= limit <= 1_000_000:
+            raise ValueError("每个分镜剧本文字上限必须在 1 至 1000000 字之间")
+        return limit
+
+    def _creation_config_summary(self, runtime: dict[str, Any] | None = None) -> str:
+        """Render the creation-time contract shared by expansion and decomposition prompts."""
+
+        values = runtime or {}
+        minimum, maximum = self.expansion_char_limits(values)
+        return (
+            f"项目创建配置：目标剧集数={self._target_episode_count(values)}集；"
+            f"扩写剧本总字数={minimum}至{maximum}字；"
+            f"每个分镜剧本文字不超过{self._shot_script_char_limit(values)}字；"
+            f"风格={values.get('style') or '真人风格'}；题材={values.get('theme') or '都市'}；"
+            f"画幅={values.get('ratio') or '9:16'}；分辨率={values.get('resolution') or '720p'}；"
+            f"分镜元素约束={json.dumps(values.get('shot_constraints') or {}, ensure_ascii=False)}。"
+        )
+
+    @staticmethod
     def _character_personality(identity: str, index: int) -> str:
         """Return behavior-level traits instead of a vague personality adjective."""
 

@@ -20,8 +20,8 @@ def _script_planner():
 class ScriptPlannerDecompositionMixin:
     """Behavior slice of _script_planner()."""
 
-    @staticmethod
     def _decomposition_prompt(
+        self,
         script: str,
         runtime: dict[str, Any],
         skill_context: dict[str, Any],
@@ -33,7 +33,7 @@ class ScriptPlannerDecompositionMixin:
             "{\"title\":\"...\",\"original_text\":\"...\",\"prompt\":\"...\"}]}],"
             "\"assets\":[{\"type\":\"character|scene|prop\",\"name\":\"...\",\"prompt\":\"...\"}]}。\n"
             "请按剧情时间线均匀拆解：每集至少 2 个分镜，每个分镜只承载一个连续动作或一个明确的信息变化，"
-            "建议每个分镜 20～80 个字、对应约 3～8 秒视频，并且能独立生成视频、又能和相邻镜头衔接。"
+            f"每个分镜剧本文字不得超过{self._shot_script_char_limit(runtime)}字、对应约 3～8 秒视频，并且能独立生成视频、又能和相邻镜头衔接。"
             "original_text 必须是当前分镜对应的短文本片段，不能复制完整剧本，不能让多个分镜重复同一段；"
             "需要把完整剧本中的事件按顺序分配到各个分镜，保证每个片段只出现一次。"
             "素材目录是独立的视觉设定，不是剧本原文摘抄。每种素材至少生成 5 个，"
@@ -54,9 +54,7 @@ class ScriptPlannerDecompositionMixin:
             "并严格约束服饰、建筑陈设、交通、照明、道具形制和制作工艺符合该背景的时代与技术水平；"
             "除非剧本明确包含穿越或跨时代设定，否则不得混入跨时代元素。\n"
             "素材只提取剧本真实出现且会复用的角色、场景、道具，并为后续图片生成补齐视觉细节。\n"
-            f"配置：风格={runtime.get('style', '真人风格')}，题材={runtime.get('theme', '都市')}，"
-            f"画幅={runtime.get('ratio', '9:16')}，分辨率={runtime.get('resolution', '720p')}，"
-            f"分镜约束={json.dumps(runtime.get('shot_constraints') or {}, ensure_ascii=False)}。\n"
+            f"{self._creation_config_summary(runtime)}\n"
             f"分镜 Skill 执行结果：{json.dumps(skill_context, ensure_ascii=False)}\n"
             f"素材 Skill 执行结果：{json.dumps(asset_skill_context or {}, ensure_ascii=False)}\n"
             f"剧本：\n{script}"

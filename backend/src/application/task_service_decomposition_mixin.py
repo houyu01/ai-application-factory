@@ -33,7 +33,11 @@ class TaskServiceDecompositionMixin:
                 task_id, progress=65, stage="正在拆解扩写剧本"
             )
             if isinstance(self.planner, ScriptPlanner):
-                plan = self.planner.plan(screenplay, options=runtime)
+                plan = self.planner.plan(
+                    screenplay,
+                    options=runtime,
+                    is_cancelled=lambda: self._script_expansion_cancelled(task_id),
+                )
             else:
                 plan = self.planner.plan(screenplay)
             if (
@@ -222,5 +226,5 @@ class TaskServiceDecompositionMixin:
         if callable(resolver):
             return resolver(self._provider_options(project, "language"))
         minimum = int(getattr(self.planner, "EXPANDED_SCRIPT_TARGET_CHARS", 0) or 0)
-        maximum = int(project.get("expanded_script_max_chars") or 100_000)
+        maximum = int(project.get("expanded_script_max_chars") or 10_000)
         return minimum, max(minimum, maximum)

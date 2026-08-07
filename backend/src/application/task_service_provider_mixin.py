@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-import base64
 import json
 import logging
 import os
-import re
 from urllib.request import Request, urlopen
 from urllib.parse import urlparse
 from typing import Any
@@ -15,13 +13,17 @@ from ..infrastructure.media_store import media_store
 from ..llm_service.planner import ScriptPlanner
 from ..llm_service.client.ark_client import ArkClient
 from ..llm_service.client.openai_client import OpenAICLient, OpenAIClientBaseOptions
+from .task_service_video_reference_mixin import TaskServiceVideoReferenceMixin
 logger = logging.getLogger(__name__)
 VIDEO_REFERENCE_IMAGE_REVIEW_NOTICE = (
     "生成视频中所有的参考图，均为seedream生成的图片，并不是真人，请认真审核查看"
 )
+VIDEO_PUBLIC_CONTINUITY_NOTICE = (
+    "视频全程保持画面内所有物体、道具、摆件数量不变，物体不消失、不凭空新增，物体位置轻微变化，物体形态材质保持一致，镜头平滑运动，无物体闪烁，无物体突然出现或突然消失，时序连贯，画面一致性强，流畅过渡"
+)
 def utc_now_after(seconds: int) -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
-class TaskServiceProviderMixin:
+class TaskServiceProviderMixin(TaskServiceVideoReferenceMixin):
     """Behavior slice of TaskService."""
     def _provider_options(self, project: dict[str, Any], kind: str) -> dict[str, Any]:
         current = self._refresh_setting(kind)
@@ -49,9 +51,10 @@ class TaskServiceProviderMixin:
             "ratio": project.get("ratio"),
             "resolution": project.get("resolution", "720p"),
             "shot_constraints": project.get("shot_constraints") or {},
-            "episode_count": project.get("episode_count", 50),
-            "expanded_script_min_chars": project.get("expanded_script_min_chars", 50_000),
-            "expanded_script_max_chars": project.get("expanded_script_max_chars", 100_000),
+            "episode_count": project.get("episode_count", 25),
+            "expanded_script_min_chars": project.get("expanded_script_min_chars", 5_000),
+            "expanded_script_max_chars": project.get("expanded_script_max_chars", 10_000),
+            "shot_script_max_chars": project.get("shot_script_max_chars", 400),
         }
     def save_storage_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Validate, persist, and activate the selected media backend."""
@@ -94,102 +97,6 @@ class TaskServiceProviderMixin:
         if isinstance(content, bytes):
             return media_store.save(content, extension)
         raise RuntimeError(f"{provider_label}没有返回可保存的结果")
-    @staticmethod
-    def _video_reference_images(
-        project: dict[str, Any], shot: dict[str, Any], public_media_base_url: str | None = None
-    ) -> list[str]:
-        assets_by_id = {
-            str(asset.get("id")): asset
-            for asset in project.get("assets", [])
-            if asset.get("id")
-        }
-        references: list[str] = []
-        seen: set[str] = set()
-        nodes = shot.get("prompt_rich") or []
-        if not isinstance(nodes, list):
-            return references
-        for node in nodes:
-            if not isinstance(node, dict) or node.get("type") != "reference":
-                continue
-            referenced = assets_by_id.get(str(node.get("asset_id") or ""), {})
-            if node.get("asset_type") == "placeholder" and (referenced.get("metadata") or {}).get("render_mode") != "generated_composite":
-                continue
-            image_url = media_store.provider_reference_url(node.get("image_url") or referenced.get("image_url"), public_media_base_url)
-            if not isinstance(image_url, str) or not image_url or image_url in seen:
-                continue
-            seen.add(image_url)
-            references.append(image_url)
-        return references
-
-    @staticmethod
-    def _video_boundary_frames(
-        shot: dict[str, Any], public_media_base_url: str | None = None
-    ) -> dict[str, str]:
-        """Resolve saved first/last frame images into provider-readable URLs."""
-
-        frames = shot.get("first_last_frames") or {}
-        resolved: dict[str, str] = {}
-        for side in ("first", "last"):
-            value = frames.get(side) if isinstance(frames, dict) else None
-            raw_url = value.get("url") if isinstance(value, dict) else value
-            if isinstance(raw_url, str) and raw_url.startswith("data:image/"):
-                try:
-                    header, encoded = raw_url.split(",", 1)
-                    extension = ".png" if "png" in header else ".jpg"
-                    media_url = media_store.save(base64.b64decode(encoded), extension, "image/png" if extension == ".png" else "image/jpeg")
-                    raw_url = media_store.provider_reference_url(media_url, public_media_base_url)
-                except (ValueError, base64.binascii.Error):
-                    raw_url = None
-            else:
-                raw_url = media_store.provider_reference_url(raw_url, public_media_base_url)
-            if isinstance(raw_url, str) and raw_url:
-                resolved[side] = raw_url
-        return resolved
-
-    def _video_generation_inputs(
-        self,
-        project: dict[str, Any],
-        shot: dict[str, Any],
-        public_media_base_url: str | None = None,
-    ) -> tuple[str, list[str]]:
-        """Build ordered references and prompt-directed frame controls.
-
-        The video worker calls this before creating any provider task. Provider
-        clients map the common ``@图N`` notation to their native media protocol;
-        saved boundary frames are normal references and the prompt identifies
-        their exact image numbers.
-        """
-
-        reference_images = self._video_reference_images(
-            project, shot, public_media_base_url
-        )
-        boundary_frames = self._video_boundary_frames(
-            shot, public_media_base_url
-        )
-        frame_instructions: list[str] = []
-        for side in ("first", "last"):
-            image_url = boundary_frames.get(side)
-            if not image_url:
-                continue
-            reference_index = len(reference_images) + 1
-            reference_images.append(image_url)
-            if side == "first":
-                frame_instructions.append(
-                    f"@图{reference_index} 是视频首帧：视频第一帧必须以该图的主体、构图、光线和状态开始。"
-                )
-            else:
-                frame_instructions.append(
-                    f"@图{reference_index} 是视频尾帧：视频最后一帧必须收束到该图的主体、构图、光线和状态。"
-                )
-        prompt = self._video_generation_prompt(project, shot)
-        if not frame_instructions:
-            return prompt, reference_images
-        frame_prompt = (
-            "首尾帧控制（最高优先级）：输入参考图与 @图编号按相同顺序对应。\n"
-            + "\n".join(frame_instructions)
-        )
-        return "\n\n".join((prompt, frame_prompt)), reference_images
-
     @staticmethod
     def _persist_media_url(url: str, extension: str) -> str:
         """Copy a provider URL into the active store before exposing it."""
@@ -296,6 +203,8 @@ class TaskServiceProviderMixin:
                 f"整体保持{project.get('style') or '真人风格'}，"
                 f"题材为{project.get('theme') or '都市'}，按剧本处理方式组织镜头。"
             )
+        if VIDEO_PUBLIC_CONTINUITY_NOTICE not in public_prompt:
+            public_prompt = "\n".join((public_prompt, VIDEO_PUBLIC_CONTINUITY_NOTICE))
         shot_prompt = str(shot.get("prompt") or "").strip()
         constraints = project.get("shot_constraints") or {}
         constraint_prompt = (
@@ -352,7 +261,8 @@ class TaskServiceProviderMixin:
 
         options = self._provider_options(project, "video")
         prompt, reference_images = self._video_generation_inputs(
-            project, shot, public_media_base_url
+            project, shot, public_media_base_url,
+            reference_limit=self._wan_reference_image_limit(options),
         )
         endpoint = os.getenv("VIDEO_GENERATION_ENDPOINT")
         if endpoint and not options.get("create_url"):

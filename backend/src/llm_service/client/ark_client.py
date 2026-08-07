@@ -149,7 +149,7 @@ class ArkClient:
         """Create a provider task without waiting for completion."""
 
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        for image_url in reference_images or []:
+        for image_url in dict.fromkeys(str(image) for image in reference_images or [] if image):
             content.append(
                 {
                     "type": "image_url",

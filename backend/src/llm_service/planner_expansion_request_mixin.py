@@ -62,6 +62,7 @@ class ScriptPlannerExpansionRequestMixin:
                 "episode_count": self._expansion_episode_count(runtime),
                 "target_min_chars": minimum_chars,
                 "target_max_chars": maximum_chars,
+                "shot_script_max_chars": self._shot_script_char_limit(runtime),
             },
         )
         self._raise_if_expansion_cancelled(is_cancelled)
@@ -79,8 +80,7 @@ class ScriptPlannerExpansionRequestMixin:
             "content": (
                 "请为长篇短剧扩写建立紧凑故事圣经和分集推进表。保留原稿中的明确人物、事件、"
                 "设定和情感走向；补齐连续的冲突、反转、伏笔和结局，不要写正文剧本。\n"
-                f"目标剧集数：{self._expansion_episode_count(runtime)} 集。\n"
-                f"完整剧本长度要求：至少 {minimum_chars:,} 字，最多 {maximum_chars:,} 字。\n"
+                f"{self._creation_config_summary(runtime)}\n"
                 f"联网同类框架研究（只可借鉴抽象叙事结构，禁止复写作品内容）：\n{framework_research}\n"
                 f"创意扩写技能：{premise_context.get('instruction', '')}\n"
                 f"故事圣经技能：{bible_context.get('instruction', '')}\n"
@@ -145,6 +145,7 @@ class ScriptPlannerExpansionRequestMixin:
             "content": (
                 "请直接续写长篇短剧正文，不要解释、不要写创作说明。必须是具体场景、"
                 "动作、对白和情绪推进，而不是梗概或重复前文。\n"
+                f"{self._creation_config_summary(runtime)}\n"
                 f"{self._installment_format_requirements(installment, episode_start, episode_end, target_episode_chars, installment_max_chars)}\n"
                 f"写作技能：{writer_context.get('instruction', '')}\n"
                 f"故事圣经：\n{outline[:6_000]}\n"

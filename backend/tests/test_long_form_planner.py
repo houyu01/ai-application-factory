@@ -81,16 +81,16 @@ class RecordingLongFormAgent:
                 {
                     "name": f"第{number}集：线索反转{number}",
                     "shots": [
-                        {"title": "发现线索", "original_text": "错误的整集文本", "prompt": rich_prompt, "duration": 5},
-                        {"title": "冲突升级", "original_text": "错误的整集文本", "prompt": rich_prompt, "duration": 5},
+                        {"title": "发现线索", "original_text": "错误的整集文本", "prompt": rich_prompt, "duration": 10},
+                        {"title": "冲突升级", "original_text": "错误的整集文本", "prompt": rich_prompt},
                     ],
                 }
             )
         return json.dumps({"episodes": episodes, "assets": []}, ensure_ascii=False)
 
 
-def test_short_premise_becomes_web_researched_fifty_episode_storyboards(monkeypatch) -> None:
-    """Configured long-drama creation must research, expand, and batch-plan 50 episodes."""
+def test_short_premise_becomes_web_researched_twenty_five_episode_storyboards(monkeypatch) -> None:
+    """Configured long-drama creation must research, expand, and batch-plan 25 episodes."""
 
     planner = ScriptPlanner()
     agent = RecordingLongFormAgent()
@@ -107,19 +107,20 @@ def test_short_premise_becomes_web_researched_fifty_episode_storyboards(monkeypa
     )
 
     assert expanded is not None
-    assert len(expanded) >= 50_000
-    assert planner._episode_count(expanded) >= 50
+    assert len(expanded) >= 5_000
+    assert planner._episode_count(expanded) >= 25
     assert [name for name, _arguments in agent.skill_calls].count("story_framework_researcher") == 4
 
     plan = planner.plan(expanded, {"model": "test-long-form", "theme": "都市悬疑"})
 
-    assert len(plan["episodes"]) == 50
+    assert len(plan["episodes"]) == 25
     assert all(2 <= len(episode["shots"]) <= 4 for episode in plan["episodes"])
     assert all(
         shot["original_text"] != "错误的整集文本"
         and "场景：" in shot["prompt"]
         and "角色：" in shot["prompt"]
         and "【镜头" in shot["prompt"]
+        and shot["duration"] == 10
         for episode in plan["episodes"]
         for shot in episode["shots"]
     )
@@ -138,6 +139,26 @@ def test_requested_episode_count_controls_storyboard_count(monkeypatch) -> None:
 
     assert len(plan["episodes"]) == 7
     assert "只能拆解第001至第007集" in agent.completions[0][0]
+    assert "每个分镜剧本文字不超过400字" in agent.completions[0][0]
+    assert all(len(shot["original_text"]) <= 400 for episode in plan["episodes"] for shot in episode["shots"])
+
+
+def test_long_form_storyboards_accept_the_worker_cancellation_callback(monkeypatch) -> None:
+    """The durable decomposition worker can use the cancellable stream path."""
+
+    planner = ScriptPlanner()
+    agent = RecordingLongFormAgent()
+    screenplay = RecordingLongFormAgent._installment(1, 7)
+    monkeypatch.setattr(planner, "_agent", lambda *_args: agent)
+
+    plan = planner.plan(
+        screenplay,
+        {"model": "test-long-form", "episode_count": 7},
+        is_cancelled=lambda: False,
+    )
+
+    assert len(plan["episodes"]) == 7
+    assert agent.completions
 
 
 def test_long_form_expansion_stays_within_the_project_character_range(monkeypatch) -> None:
@@ -152,6 +173,7 @@ def test_long_form_expansion_stays_within_the_project_character_range(monkeypatc
         "林岩回到故乡，在旧宅发现一把钥匙。",
         {
             "model": "test-long-form",
+            "episode_count": 50,
             "expanded_script_min_chars": 50_000,
             "expanded_script_max_chars": 60_000,
         },
@@ -175,6 +197,7 @@ def test_story_bible_prompt_uses_the_project_character_range() -> None:
         "episode_count": 8,
         "expanded_script_min_chars": 60_000,
         "expanded_script_max_chars": 80_000,
+        "shot_script_max_chars": 240,
     }
 
     planner._build_expansion_outline(agent, "林岩在旧宅寻找钥匙。", runtime)
@@ -185,9 +208,11 @@ def test_story_bible_prompt_uses_the_project_character_range() -> None:
     assert premise_arguments["target_min_chars"] == 60_000
     assert premise_arguments["target_max_chars"] == 80_000
     assert premise_arguments["episode_count"] == 8
-    assert "目标剧集数：8 集" in agent.completions[-1][0]
+    assert premise_arguments["shot_script_max_chars"] == 240
+    assert "目标剧集数=8集" in agent.completions[-1][0]
     assert "必须规划8集" in planner._story_bible_format_requirements(runtime)
-    assert "至少 60,000 字，最多 80,000 字" in agent.completions[-1][0]
+    assert "扩写剧本总字数=60000至80000字" in agent.completions[-1][0]
+    assert "每个分镜剧本文字不超过240字" in agent.completions[-1][0]
 
     instruction = PremiseExpanderSkill().execute(
         {
@@ -197,10 +222,12 @@ def test_story_bible_prompt_uses_the_project_character_range() -> None:
             "episode_count": 50,
             "target_min_chars": 60_000,
             "target_max_chars": 80_000,
+            "shot_script_max_chars": 240,
         },
         SkillContext(agent_name="test"),
     )["instruction"]
     assert "至少60,000字、最多80,000字" in instruction
+    assert "每个分镜剧本文字不超过240字" in instruction
 
 
 def test_long_form_creation_requires_a_configured_language_model(monkeypatch) -> None:
@@ -236,7 +263,7 @@ def test_retry_reuses_story_bible_and_continues_after_saved_episodes(monkeypatch
 
     expanded = planner.expand_script(
         "林岩回到故乡，在旧宅发现一把钥匙。",
-        {"model": "test-long-form"},
+        {"model": "test-long-form", "expanded_script_max_chars": 60_000},
         existing_script=existing,
         existing_outline="已保存的故事圣经：人物弧、冲突线和终局回收。",
     )

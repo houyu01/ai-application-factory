@@ -22,11 +22,11 @@ def delete_project_shot_video(project_id: str, shot_id: str, video_id: str):
 
 @api_router.post("/projects/{project_id}/shots/{shot_id}/video/cancel", status_code=202)
 def cancel_project_shot_video(project_id: str, shot_id: str):
-    """Stop the selected shot's running video when its dropdown action is clicked.
+    """Stop every selected-shot video run when its dropdown action is clicked.
 
-    The editor exposes this only while a durable ``shot_video`` task is
-    generating. The service marks that task cancelled before asking Volcengine
-    Ark to delete the remote generation, then returns the terminal task state.
+    The editor exposes this only while durable ``shot_video`` tasks are
+    generating. The service marks each run cancelled before asking Volcengine
+    Ark to delete remote generations, then returns the final task state/count.
     """
 
     try:

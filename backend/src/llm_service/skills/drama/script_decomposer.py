@@ -1,4 +1,6 @@
-from src.llm_service.skills.base import BaseSkill
+from typing import Any
+
+from src.llm_service.skills.base import BaseSkill, SkillContext
 
 
 class ScriptDecomposerSkill(BaseSkill):
@@ -13,6 +15,7 @@ class ScriptDecomposerSkill(BaseSkill):
             "theme": {"type": "string"},
             "ratio": {"type": "string"},
             "resolution": {"type": "string", "description": "视频分辨率，例如 720p 或 480p"},
+            "shot_script_max_chars": {"type": "integer", "description": "每个分镜剧本文字上限"},
             "shot_constraints": {
                 "type": "object",
                 "properties": {
@@ -28,6 +31,7 @@ class ScriptDecomposerSkill(BaseSkill):
             "theme",
             "ratio",
             "resolution",
+            "shot_script_max_chars",
             "shot_constraints",
         ],
         "additionalProperties": False,
@@ -45,7 +49,7 @@ title、original_text、prompt。assets 中只能使用 character、scene、prop
 每个角色、场景、道具 prompt 第一行必须写“叙述背景主题：<theme 参数原文>”，并保证角色服饰、
 场景建筑与陈设、道具形制与工艺符合该背景的时代、地域和技术水平；剧本未明确穿越时禁止混入跨时代元素。
 请按照剧情时间线均匀拆解剧本：每个分镜只表达一个连续动作或一个明确的信息变化，
-建议每个分镜 20～80 个字、约 3～8 秒视频。original_text 只能填写当前分镜的短文本片段，
+每个分镜剧本文字不得超过{shot_script_max_chars}字、约 3～8 秒视频。original_text 只能填写当前分镜的短文本片段，
 禁止把完整剧本复制到每个分镜，禁止多个分镜重复同一段；完整剧本中的事件要按顺序分配到各个分镜。
 分镜要能直接用于后续的视频提示词生成，明确主体、动作、场景、镜头、光线、风格、分辨率和字幕/背景音乐约束。
 遇到“【第001集：集名】”格式的长剧正文时，必须按既有集号拆成独立 episode，不能重新合并；
@@ -53,3 +57,12 @@ title、original_text、prompt。assets 中只能使用 character、scene、prop
 “场景：\n@图1（场景）\n\n角色：\n@图2（角色）\n\n道具：\n@图3（道具）\n\n风格：…\n光线：…\n位置：…\n\n【镜头1 | …】…”。
 引用可先保留为待生成素材，禁止把整集、整部剧或原始用户剧本直接填入 prompt。
 """.strip()
+
+    def execute(self, arguments: dict[str, Any], context: SkillContext) -> dict[str, Any]:
+        """Apply the saved storyboard-script ceiling to the decomposition instruction."""
+
+        result = super().execute(arguments, context)
+        result["instruction"] = self.instruction.format(
+            shot_script_max_chars=int(arguments["shot_script_max_chars"])
+        )
+        return result

@@ -112,6 +112,7 @@ class ScriptPlannerRepairMixin:
     @staticmethod
     def _normalize_plan(raw: dict[str, Any], script: str, runtime: dict[str, Any]) -> dict[str, Any]:
         episodes: list[dict[str, Any]] = []
+        shot_script_max_chars = _script_planner()._shot_script_char_limit(runtime)
         raw_episodes = raw.get("episodes") if isinstance(raw, dict) else []
         if isinstance(raw_episodes, dict):
             raw_episodes = [raw_episodes]
@@ -132,7 +133,7 @@ class ScriptPlannerRepairMixin:
                     or raw_shot.get("storyboard_text")
                     or raw_shot.get("script")
                     or script[:180]
-                ).strip()
+                ).strip()[:shot_script_max_chars]
                 shots.append(
                     {
                         "id": raw_shot.get("id") or f"shot_{episode_index}_{shot_index}",
@@ -171,6 +172,10 @@ class ScriptPlannerRepairMixin:
         # complete 50-episode screenplay across all shots and destroy that plan.
         if episodes and not planner._is_long_form_screenplay(script, runtime):
             episodes = planner._repair_shot_segments(episodes, script, runtime)
+        for episode in episodes:
+            for shot in episode.get("shots", []):
+                if isinstance(shot, dict):
+                    shot["original_text"] = str(shot.get("original_text") or "")[:shot_script_max_chars]
         if not episodes:
             fallback = _script_planner()._fallback_plan(script, runtime)
             episodes = episodes or fallback["episodes"]

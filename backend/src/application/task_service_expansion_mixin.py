@@ -32,8 +32,11 @@ class TaskServiceExpansionMixin:
         active_task = latest_task if latest_task and latest_task.get("status") == GenerationStatus.GENERATING.value else None
         stage = str((latest_task or {}).get("stage") or "")
         screenplay["expanded_script_generating"] = bool(active_task)
-        screenplay["expanded_script_cancellable"] = bool(active_task) and not (
-            active_task and active_task.get("type") == "script_decomposition" and "拆解" in stage
+        screenplay["expanded_script_cancellable"] = bool(active_task)
+        screenplay["expanded_script_cancel_label"] = (
+            "取消生成"
+            if active_task and active_task.get("type") == "script_decomposition" and "拆解" in stage
+            else "取消扩写"
         )
         screenplay["expanded_script_task_status"] = (latest_task or {}).get("status")
         screenplay["expanded_script_error_message"] = (latest_task or {}).get("error_message")
@@ -76,12 +79,15 @@ class TaskServiceExpansionMixin:
         return task
 
     def cancel_expanded_script(self, project_id: str) -> dict[str, Any]:
-        """Cancel a running expansion or confirm that its failed task has stopped.
+        """Cancel a running expansion or its following decomposition task.
 
         The screenplay dialog can submit a click while its last status refresh
         is still showing a cancellable task.  If the worker has already saved
         a failure by then, returning that failed task confirms that no worker
         or provider call remains to cancel while preserving the failure reason.
+        A bootstrap task remains cancellable while it is decomposing the
+        screenplay, so the project queue can stop without waiting for that
+        later phase to finish.
         """
 
         self.get_project(project_id)
@@ -235,7 +241,7 @@ class TaskServiceExpansionMixin:
         if callable(resolver):
             _, maximum = resolver(self._provider_options(project, "language"))
             return maximum
-        return int(project.get("expanded_script_max_chars") or 100_000)
+        return int(project.get("expanded_script_max_chars") or 10_000)
 
     def _latest_expansion_story_bible(self, project_id: str) -> str:
         """Reuse the latest saved outline so follow-up prose keeps continuity."""

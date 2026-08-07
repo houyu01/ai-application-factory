@@ -57,12 +57,14 @@ def continue_project_expanded_script(project_id: str):
 
 @api_router.post("/projects/{project_id}/expanded-script/cancel", status_code=202)
 def cancel_project_expanded_script(project_id: str):
-    """Stop the active screenplay expansion when the dialog cancel button is clicked.
+    """Stop active screenplay expansion or storyboard decomposition from the dialog.
 
     This persists cancellation before returning so the browser can stop polling;
     the worker then observes the task status, closes any active stream, and
-    returns its concurrency slot. A click that races a recorded failure returns
-    that failed task unchanged, confirming to the dialog that it already stopped.
+    returns its concurrency slot. This applies throughout the bootstrap flow,
+    including the later storyboard-decomposition stage. A click that races a
+    recorded failure returns that failed task unchanged, confirming to the
+    dialog that it already stopped.
     """
 
     try:

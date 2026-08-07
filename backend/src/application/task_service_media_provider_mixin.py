@@ -12,6 +12,13 @@ from ..llm_service.client.volcengine_tts_client import VolcengineTtsClient
 from .model_provider_profiles import normalized_provider
 
 
+AI_GENERATED_IMAGE_TAG_PROMPT = (
+    "标识要求（必须遵守，优先级最高）：在画面左上角添加“AI生成”标签。"
+    "标签使用小型圆角矩形、深色半透明底、细浅色描边与浅灰文字，"
+    "距上边和左边保留安全边距，不遮挡主体；除该标签外不添加其他文字或水印。"
+)
+
+
 class TaskServiceMediaProviderMixin:
     """Route configured image and audio requests to Ark, DashScope, or Tencent.
 
@@ -25,9 +32,16 @@ class TaskServiceMediaProviderMixin:
 
         return normalized_provider(options.get("provider"))
 
+    @staticmethod
+    def _image_prompt_with_ai_generated_tag(prompt: str) -> str:
+        """Append the mandatory provenance label to every provider image prompt."""
+
+        return "\n\n".join(part for part in (prompt.strip(), AI_GENERATED_IMAGE_TAG_PROMPT) if part)
+
     def _generate_provider_image(self, options: dict[str, Any], prompt: str, *, ratio: str = "9:16", reference_images: list[str] | None = None) -> dict[str, Any]:
         """Generate one image through the selected cloud provider."""
 
+        prompt = self._image_prompt_with_ai_generated_tag(prompt)
         provider = self._model_provider_name(options)
         api_key = str(options.get("api_key") or "")
         model = str(options.get("model") or "")
