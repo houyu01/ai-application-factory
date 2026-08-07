@@ -82,8 +82,8 @@ class TaskServiceModelProbeMixin:
             client.probe_credentials()
             return
         references = (
-            ["https://cdn.translate.alibaba.com/r/wanx-demo-1.png"]
-            if provider == "dashscope" and "happyhorse" in model.lower()
+            self._dashscope_r2v_probe_references(model)
+            if provider == "dashscope"
             else None
         )
         created = client.create_video_task(
@@ -106,6 +106,16 @@ class TaskServiceModelProbeMixin:
                     client.cancel_video_task(task_id)
             except Exception as exc:  # Cleanup failure must not hide a valid probe.
                 logger.warning("视频模型嗅探任务取消失败：%s", exc)
+
+    @staticmethod
+    def _dashscope_r2v_probe_references(model: str) -> list[str] | None:
+        """Return the mandatory test image for DashScope R2V credential probes."""
+
+        normalized_model = model.lower()
+        supports_r2v = (
+            "happyhorse" in normalized_model and "-r2v" in normalized_model
+        ) or normalized_model.startswith("wan2.7-r2v")
+        return ["https://cdn.translate.alibaba.com/r/wanx-demo-1.png"] if supports_r2v else None
 
     def _probe_audio(self, config: dict[str, Any], api_key: str, model: str) -> None:
         result = self._generate_provider_audio(

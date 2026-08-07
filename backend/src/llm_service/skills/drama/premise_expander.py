@@ -16,15 +16,16 @@ class PremiseExpanderSkill(BaseSkill):
             "episode_count": {"type": "integer", "description": "计划集数"},
             "target_min_chars": {"type": "integer", "description": "扩写剧本最小字数"},
             "target_max_chars": {"type": "integer", "description": "扩写剧本最大字数"},
+            "shot_script_max_chars": {"type": "integer", "description": "每个分镜剧本文字上限"},
         },
         "required": [
             "premise", "genre", "target_audience", "episode_count",
-            "target_min_chars", "target_max_chars",
+            "target_min_chars", "target_max_chars", "shot_script_max_chars",
         ],
         "additionalProperties": False,
     }
     instruction = """
-扩展一句话创意，为{episode_count}集、至少{target_min_chars}字、最多{target_max_chars}字的完整剧本设计足够的剧情容量，输出结构化的故事核心设定：logline、核心冲突、主题、
+扩展一句话创意，为{episode_count}集、至少{target_min_chars}字、最多{target_max_chars}字的完整剧本设计足够的剧情容量，并确保后续每个分镜剧本文字不超过{shot_script_max_chars}字，输出结构化的故事核心设定：logline、核心冲突、主题、
 世界观、主要人物关系、主线悬念、阶段性目标和结局方向。请尽量参考市面上的常见对应类型的小说(使用目前的故事类型，去互联网上参考类似的小说，进行剧情扩写)
 扩展的内容包括但不限于：
 1. 故事的反转(如好人坏人之间的关系反转)
@@ -42,8 +43,10 @@ class PremiseExpanderSkill(BaseSkill):
         result = super().execute(arguments, context)
         minimum = int(arguments["target_min_chars"])
         maximum = int(arguments["target_max_chars"])
+        shot_script_max_chars = int(arguments["shot_script_max_chars"])
         result["instruction"] = self.instruction.format(
             episode_count=int(arguments["episode_count"]),
-            target_min_chars=f"{minimum:,}", target_max_chars=f"{maximum:,}"
+            target_min_chars=f"{minimum:,}", target_max_chars=f"{maximum:,}",
+            shot_script_max_chars=f"{shot_script_max_chars:,}",
         )
         return result

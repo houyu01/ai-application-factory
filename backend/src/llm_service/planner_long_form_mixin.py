@@ -17,7 +17,8 @@ class ScriptPlannerLongFormMixin:
     silently collapsing the project into a handful of generic shots.
     """
 
-    LONG_FORM_MIN_EPISODES = 50
+    LONG_FORM_MIN_EPISODES = 25
+    LONG_FORM_MIN_CHARS = 5_000
     LONG_FORM_BATCH_SIZE = 10
     LONG_FORM_EPISODES_PER_INSTALLMENT = 5
     LONG_FORM_RESEARCH_TOPICS = (
@@ -48,7 +49,7 @@ class ScriptPlannerLongFormMixin:
 
         if runtime and "episode_count" in runtime:
             return True
-        return int(getattr(self, "EXPANDED_SCRIPT_TARGET_CHARS", 0) or 0) >= 50_000
+        return int(getattr(self, "EXPANDED_SCRIPT_TARGET_CHARS", 0) or 0) >= self.LONG_FORM_MIN_CHARS
 
     @classmethod
     def _episode_count(cls, screenplay: str) -> int:
@@ -110,9 +111,9 @@ class ScriptPlannerLongFormMixin:
         """Describe the mandatory target-episode story-bible output contract."""
 
         if not self._requires_long_form_expansion(runtime):
-            return "给出可执行的人物弧、冲突线、伏笔和结局。"
+            return f"{self._creation_config_summary(runtime)}\n给出可执行的人物弧、冲突线、伏笔和结局。"
         return (
-            f"必须规划{self._target_episode_count(runtime)}集，按连续篇章组织。逐集给出集号、集名、核心冲突、"
+            f"{self._creation_config_summary(runtime)}\n必须规划{self._target_episode_count(runtime)}集，按连续篇章组织。逐集给出集号、集名、核心冲突、"
             "人物推进、结尾钩子和衔接状态；不要复述或模仿任何检索作品。"
         )
 
@@ -155,8 +156,8 @@ class ScriptPlannerLongFormMixin:
         """Resolve one project's validated expanded-screenplay character range."""
 
         values = runtime or {}
-        default_minimum = int(getattr(self, "EXPANDED_SCRIPT_TARGET_CHARS", 50_000) or 50_000)
-        default_maximum = int(getattr(self, "EXPANDED_SCRIPT_MAX_CHARS", 100_000) or 100_000)
+        default_minimum = int(getattr(self, "EXPANDED_SCRIPT_TARGET_CHARS", 10_000) or 10_000)
+        default_maximum = int(getattr(self, "EXPANDED_SCRIPT_MAX_CHARS", 50_000) or 50_000)
         try:
             minimum = int(values.get("expanded_script_min_chars", default_minimum))
             maximum = int(values.get("expanded_script_max_chars", default_maximum))
@@ -287,10 +288,15 @@ class ScriptPlannerLongFormMixin:
         return "\n\n".join(notes)
 
     def _plan_long_form(
-        self, screenplay: str, runtime: dict[str, Any], agent: Any
+        self,
+        screenplay: str,
+        runtime: dict[str, Any],
+        agent: Any,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> dict[str, Any]:
         """Generate a storyboard skeleton in bounded episode batches."""
 
+        self._raise_if_expansion_cancelled(is_cancelled)
         target_episode_count = self._target_episode_count(runtime)
         sections = self._long_form_sections(screenplay)
         if len(sections) < target_episode_count:
@@ -299,14 +305,21 @@ class ScriptPlannerLongFormMixin:
         assets: list[dict[str, Any]] = []
         episodes: list[dict[str, Any]] = []
         for start in range(0, len(sections), self.LONG_FORM_BATCH_SIZE):
+            self._raise_if_expansion_cancelled(is_cancelled)
             batch = sections[start:start + self.LONG_FORM_BATCH_SIZE]
-            response = self._completion_with_retry(
-                agent,
-                f"第{batch[0]['number']}至{batch[-1]['number']}集分镜骨架",
-                [{"role": "user", "content": self._long_form_batch_prompt(batch, runtime)}],
-                runtime,
-                tools=[{"type": "web_search"}],
+            stage = f"第{batch[0]['number']}至{batch[-1]['number']}集分镜骨架"
+            messages = [{"role": "user", "content": self._long_form_batch_prompt(batch, runtime)}]
+            response = (
+                self._stream_completion_with_retry(
+                    agent, stage, messages, runtime, lambda _delta: None,
+                    tools=[{"type": "web_search"}], is_cancelled=is_cancelled,
+                )
+                if is_cancelled
+                else self._completion_with_retry(
+                    agent, stage, messages, runtime, tools=[{"type": "web_search"}],
+                )
             )
+            self._raise_if_expansion_cancelled(is_cancelled)
             parsed = self._parse_json(response)
             batch_episodes, batch_assets = self._long_form_batch_result(parsed, batch, runtime)
             episodes.extend(batch_episodes)
@@ -335,14 +348,13 @@ class ScriptPlannerLongFormMixin:
         return (
             "你正在生成长剧的分镜骨架。请使用 web_search 仅在需要校验通用类型节奏时查询，"
             "不得复制任何搜索到的作品内容。只返回合法 JSON，格式："
-            '{"episodes":[{"name":"第001集：集名","shots":[{"title":"","original_text":"","prompt":"","duration":5}]}],'
+            '{"episodes":[{"name":"第001集：集名","shots":[{"title":"","original_text":"","prompt":"","duration":10}]}],'
             '"assets":[{"id":"","type":"character|scene|prop","name":"","prompt":""}]}。\n'
             f"必须且只能拆解第{batch[0]['number']:03d}至第{batch[-1]['number']:03d}集，不得合并、遗漏或新增集数。"
-            "每集生成2至4条按顺序衔接的分镜；original_text 只能来自该集的局部事件，不能复制整集或整剧。"
+            f"每集生成2至4条按顺序衔接的分镜；每条分镜默认 duration 为 10 秒；original_text 不超过{self._shot_script_char_limit(runtime)}字，只能来自该集的局部事件，不能复制整集或整剧。"
             "每个 prompt 必须含有‘场景：’、‘角色：’、‘风格：’、‘光线：’、‘位置：’以及至少两个‘【镜头’段落，"
             "并使用 @图1（场景）、@图2（角色）、@图3（道具）形式预留参考图，文本需分段换行。"
-            f"风格：{runtime.get('style') or '真人风格'}；叙述背景主题：{runtime.get('theme') or '都市'}；"
-            f"画幅：{runtime.get('ratio') or '9:16'}；分辨率：{runtime.get('resolution') or '720p'}。{subtitle_rule}{music_rule}\n"
+            f"{self._creation_config_summary(runtime)}{subtitle_rule}{music_rule}\n"
             "素材只产出故事中真实有意义、可复用的角色/场景/道具，角色使用人名而非身份代称。\n"
             "本批剧本：\n" + source
         )
@@ -385,7 +397,7 @@ class ScriptPlannerLongFormMixin:
                 "title": str(raw.get("title") or f"第{section['number']}集镜头{index + 1}"),
                 "original_text": segments[index] if index < len(segments) else section["body"][:160],
                 "prompt": prompt,
-                "duration": min(15, max(3, int(raw.get("duration") or 5))),
+                "duration": min(15, max(3, int(raw.get("duration") or 10))),
             })
         return shots
 
@@ -398,7 +410,7 @@ class ScriptPlannerLongFormMixin:
             "title": f"第{section['number']}集镜头{index + 1}",
             "original_text": segment,
             "prompt": self._fallback_long_form_prompt(section, segment, index + 1, runtime),
-            "duration": 5,
+            "duration": 10,
         } for index, segment in enumerate(segments)]
 
     @staticmethod

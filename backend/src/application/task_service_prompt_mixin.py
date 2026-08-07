@@ -20,15 +20,18 @@ class TaskServicePromptMixin:
         """Build camera, voice, references, and constraint fields for one shot."""
 
         text = ScriptPlanner.rich_prompt_to_text(prompt_rich)
-        references = [
-            {
-                "asset_id": node.get("asset_id"),
-                "asset_type": node.get("asset_type"),
-                "label": node.get("label"),
-            }
-            for node in prompt_rich
-            if isinstance(node, dict) and node.get("type") == "reference"
-        ]
+        references_by_asset: dict[str, dict[str, Any]] = {}
+        for node in prompt_rich:
+            if not isinstance(node, dict) or node.get("type") != "reference":
+                continue
+            asset_id = str(node.get("asset_id") or "")
+            if asset_id and asset_id not in references_by_asset:
+                references_by_asset[asset_id] = {
+                    "asset_id": asset_id,
+                    "asset_type": node.get("asset_type"),
+                    "label": node.get("label"),
+                }
+        references = list(references_by_asset.values())
         camera_shots = []
         for match in re.finditer(
             r"【镜头(\d+)\s*\|\s*时长(\d+)s\s*\|\s*时间：([^】]+)】([^【]*)", text

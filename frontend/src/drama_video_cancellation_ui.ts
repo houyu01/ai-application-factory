@@ -112,13 +112,13 @@ function bindControls(wrapper: HTMLElement) {
         { method: 'POST' },
       );
       if (!response.ok) throw new Error(await readError(response));
-      const task = await response.json() as GenerationTask & { provider_cancel_error?: string };
+      const task = await response.json() as GenerationTask & { cancelled_count?: number; provider_cancel_error?: string };
       updateLocalTask(options, task);
       closeMenu();
       if (task.provider_cancel_error) {
         options.toast(`视频已在本地取消；服务商取消请求失败：${task.provider_cancel_error}`);
       } else {
-        options.toast('视频生成已取消');
+        options.toast(`已取消 ${task.cancelled_count || 1} 个视频生成任务`);
       }
       await options.onCancelled?.();
     } catch (error) {

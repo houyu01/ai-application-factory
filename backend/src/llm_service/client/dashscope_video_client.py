@@ -49,19 +49,26 @@ class DashScopeVideoClient:
         seconds: int = 8,
         reference_images: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Submit a DashScope task using the selected HappyHorse image mode."""
+        """Submit a DashScope task using prompt-directed reference images only."""
 
-        images = [str(image) for image in reference_images or [] if image]
+        images = list(dict.fromkeys(str(image) for image in reference_images or [] if image))
         reference_to_video = self._uses_reference_images()
-        if reference_to_video and not 1 <= len(images) <= 9:
+        if self._is_first_frame_model():
             raise ValueError(
-                f"阿里云模型“{self.model}”需要传入 1 到 9 张参考图。"
+                f"阿里云模型“{self.model}”仅支持接口原生首帧图模式，"
+                "本应用不使用该模式。请改用 happyhorse-1.1-r2v。"
             )
-        if self._requires_first_frame() and not images:
+        reference_limit = self._reference_image_limit()
+        if reference_to_video and not 1 <= len(images) <= reference_limit:
             raise ValueError(
-                f"阿里云模型“{self.model}”必须提供一张首帧参考图，请先为分镜添加参考图。"
+                f"阿里云模型“{self.model}”需要传入 1 到 {reference_limit} 张参考图。"
             )
-        media = self._media(images, reference_to_video)
+        if images and not reference_to_video:
+            raise ValueError(
+                f"阿里云模型“{self.model}”不支持参考图生视频。"
+                "请改用支持 reference_image 的 R2V 模型。"
+            )
+        media = self._media(images)
         input_data: dict[str, Any] = {
             "prompt": self._reference_prompt(prompt) if reference_to_video else prompt
         }
@@ -99,28 +106,35 @@ class DashScopeVideoClient:
 
         return self._request(f"{self._task_url(task_id).rstrip('/')}/cancel", method="POST")
 
-    def _requires_first_frame(self) -> bool:
-        model = self.model.lower()
-        return "happyhorse" in model and model.endswith("-i2v")
+    def _is_first_frame_model(self) -> bool:
+        """Identify image-to-video models that require a native first frame."""
+
+        return self.model.lower().endswith("-i2v")
 
     def _uses_reference_images(self) -> bool:
-        """Return whether this HappyHorse model accepts ordered reference images."""
+        """Return whether this DashScope model accepts ordered reference images."""
 
         model = self.model.lower()
-        return "happyhorse" in model and model.endswith("-r2v")
+        return (
+            "happyhorse" in model and "-r2v" in model
+        ) or model.startswith("wan2.7-r2v")
+
+    def _reference_image_limit(self) -> int:
+        """Return the documented R2V image cap for the selected DashScope model."""
+
+        return 5 if self.model.lower().startswith("wan2.7-r2v") else 9
 
     @staticmethod
-    def _media(images: list[str], reference_to_video: bool) -> list[dict[str, str]]:
-        """Map one ordered project reference list to DashScope media objects."""
+    def _media(images: list[str]) -> list[dict[str, str]]:
+        """Map ordered project references without falling back to a first frame."""
 
-        if reference_to_video:
-            return [{"type": "reference_image", "url": image} for image in images]
-        return [{"type": "first_frame", "url": images[0]}] if images else []
+        return [{"type": "reference_image", "url": image} for image in images]
 
-    @staticmethod
-    def _reference_prompt(prompt: str) -> str:
-        """Translate the editor's Seedance-style references to HappyHorse syntax."""
+    def _reference_prompt(self, prompt: str) -> str:
+        """Translate editor reference markers to the selected R2V prompt syntax."""
 
+        if self.model.lower().startswith("wan2.7-r2v"):
+            return re.sub(r"@图\s*(\d+)", r"图\1", prompt)
         return re.sub(r"@图\s*(\d+)", r"[Image \1]", prompt)
 
     def _task_url(self, task_id: str) -> str:

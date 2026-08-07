@@ -32,10 +32,11 @@ class ProjectCreate(BaseModel):
     language_model: str = "doubao-seed"
     multimodal_model: str = "doubao-seeddream"
     video_model: str = "doubao-seedance-2.0"
-    episode_count: int = Field(default=50, ge=2, le=100)
+    episode_count: int = Field(default=25, ge=2, le=100)
     enable_web_search: bool = False
-    expanded_script_min_chars: int = Field(default=50_000, ge=50_000, le=1_000_000)
-    expanded_script_max_chars: int = Field(default=100_000, ge=50_000, le=1_000_000)
+    expanded_script_min_chars: int = Field(default=5_000, ge=1, le=1_000_000)
+    expanded_script_max_chars: int = Field(default=10_000, ge=1, le=1_000_000)
+    shot_script_max_chars: int = Field(default=400, ge=1, le=1_000_000)
     resolution: str = "720p"
     shot_constraints: DramaShotConstraints = Field(default_factory=DramaShotConstraints)
     video_public_prompt: str = ""
@@ -170,6 +171,21 @@ class TaskResponse(BaseModel):
     stage: str = ""
     provider_task_id: str | None = None
     next_poll_at: datetime | None = None
+    warning_message: str | None = None
+    input_snapshot: dict[str, Any] | None = None
+
+
+class DramaShotVideoBatchRequest(BaseModel):
+    """Requested parallel output count when the editor generates a shot video."""
+
+    count: int = Field(default=1, ge=1, le=3)
+
+
+class DramaShotVideoBatchResponse(BaseModel):
+    """Independent durable tasks created by one editor-side video request."""
+
+    requested_count: int = Field(ge=1, le=3)
+    tasks: list[TaskResponse]
 
 
 class DramaAssetUpdate(BaseModel):

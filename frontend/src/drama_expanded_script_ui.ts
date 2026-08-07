@@ -12,6 +12,7 @@ type ExpandedScriptResponse = {
   expanded_script_preview?: string;
   expanded_script_generating?: boolean;
   expanded_script_cancellable?: boolean;
+  expanded_script_cancel_label?: string;
   expanded_script_task_status?: string;
   expanded_script_error_message?: string | null;
   expanded_script_stage?: string | null;
@@ -49,7 +50,11 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
   let loading = false;
   let loadSequence = 0;
   let cancelling = false;
-  const close = () => { if (refreshTimer) window.clearInterval(refreshTimer); modal.remove(); };
+  const stopRefreshing = () => {
+    if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  };
+  const close = () => { stopRefreshing(); modal.remove(); };
   modal.querySelectorAll<HTMLElement>('.close,[data-expanded-script-close]').forEach(button => button.addEventListener('click', close));
   const originalInput = modal.querySelector<HTMLTextAreaElement>('[data-original-script]')!;
   const expandedInput = modal.querySelector<HTMLTextAreaElement>('[data-expanded-script]')!;
@@ -59,6 +64,7 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
   const saveButton = modal.querySelector<HTMLButtonElement>('[data-expanded-script-save]')!;
 
   const loadScreenplay = async (force = false) => {
+    if (cancelling && !force) return;
     if (loading && !force) return;
     const sequence = ++loadSequence;
     loading = true;
@@ -91,12 +97,12 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
       saveButton.disabled = expandedGenerating;
       cancelButton.hidden = !expansionCancellable;
       cancelButton.disabled = !expansionCancellable || cancelling;
-      if (!cancelling) cancelButton.textContent = '取消扩写';
+      if (!cancelling) cancelButton.textContent = payload.expanded_script_cancel_label || '取消扩写';
       const hasExpandableScript = streamedScript.trim().length > 0;
       continueButton.hidden = false;
       continueButton.disabled = expandedGenerating || !hasExpandableScript;
-      if (expandedGenerating && !refreshTimer) refreshTimer = window.setInterval(() => void loadScreenplay(), 1_000);
-      if (!expandedGenerating && refreshTimer) { window.clearInterval(refreshTimer); refreshTimer = undefined; }
+      if (expandedGenerating && refreshTimer === undefined) refreshTimer = window.setInterval(() => void loadScreenplay(), 1_000);
+      if (!expandedGenerating) stopRefreshing();
     } catch (error) {
       if (sequence !== loadSequence) return;
       meta.textContent = '加载剧本失败，请稍后重试。';
@@ -111,9 +117,15 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
   cancelButton.addEventListener('click', async () => {
     if (cancelling) return;
     cancelling = true;
+    const cancellationLabel = cancelButton.textContent?.trim() || '取消扩写';
+    // A prior polling response can otherwise repaint the dialog as
+    // ``generating`` after this click, making a successful cancellation look
+    // like it was ignored. Invalidate it and pause all subsequent polls.
+    loadSequence += 1;
+    stopRefreshing();
     cancelButton.disabled = true;
     cancelButton.textContent = '取消中…';
-    meta.textContent = '正在取消扩写，等待后台确认任务已停止…';
+    meta.textContent = `正在${cancellationLabel}，等待后台确认任务已停止…`;
     try {
       const response = await fetch(`${options.apiBaseUrl}/projects/${encodeURIComponent(options.projectId)}/expanded-script/cancel`, {
         method: 'POST',
@@ -126,18 +138,19 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
       if (task.status === '生成失败') {
         options.toast('扩写任务已因失败停止，无需重复取消');
       } else if (task.status === '已取消') {
-        options.toast('剧本扩写已取消，后台任务已停止');
+        options.toast(`${cancellationLabel}已确认，后台任务已停止`);
       } else {
         options.toast('扩写任务状态已确认');
       }
+      cancelling = false;
       await loadScreenplay(true);
     } catch (error) {
       options.toast(error instanceof Error ? error.message : '取消扩写失败');
       console.error(error);
+      cancelling = false;
       await loadScreenplay(true);
     } finally {
       cancelling = false;
-      cancelButton.textContent = '取消扩写';
     }
   });
 

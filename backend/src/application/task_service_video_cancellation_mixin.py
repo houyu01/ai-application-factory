@@ -20,15 +20,23 @@ class TaskServiceVideoCancellationMixin:
     """
 
     def cancel_shot_video(self, project_id: str, shot_id: str) -> dict[str, Any]:
-        """Cancel the current video run for one shot and preserve its audit row."""
+        """Cancel every active video run for one shot and preserve audit rows."""
 
         project = self.get_project(project_id)
         if self.repository.get_shot(project_id, shot_id) is None:
             raise KeyError(f"Shot not found: {shot_id}")
-        task = self.repository.get_active_task(project_id, "shot_video", shot_id)
-        if task is None:
+        tasks = [
+            task for task in self.repository.list_active_tasks(project_id, "shot_video")
+            if task.get("resource_id") == shot_id
+        ]
+        if not tasks:
             raise ValueError("当前分镜没有正在生成的视频任务")
-        return self._cancel_video_task(project, task)
+        cancelled_tasks = [self._cancel_video_task(project, task) for task in tasks]
+        return {
+            **cancelled_tasks[-1],
+            "cancelled_count": len(cancelled_tasks),
+            "cancelled_tasks": cancelled_tasks,
+        }
 
     def cancel_all_shot_videos(self, project_id: str) -> dict[str, Any]:
         """Cancel every active shot-video task when the top-bar bulk action is clicked."""
@@ -63,8 +71,8 @@ class TaskServiceVideoCancellationMixin:
         cancelled = self.repository.cancel_task(
             str(task["id"]), stage="视频生成已取消"
         )
-        self.repository.update_shot(
-            project_id, shot_id, status=GenerationStatus.CANCELLED
+        self.sync_shot_video_status(
+            project_id, shot_id, GenerationStatus.CANCELLED
         )
         self._cancel_shot_video_version(task)
 

@@ -442,4 +442,4 @@ from . import placeholder_routes  # noqa: F401  # register shot placeholder endp
 
 from . import cover_routes  # noqa: F401  # register durable cover-image endpoints
 from . import project_metadata_routes  # noqa: F401  # register project metadata endpoints
-from . import asset_batch_routes, expanded_script_routes, script_retry_routes, video_history_routes  # noqa: F401  # register screenplay and video-history endpoints
+from . import asset_batch_routes, expanded_script_routes, script_retry_routes, video_generation_routes, video_history_routes  # noqa: F401  # register screenplay and video-history endpoints

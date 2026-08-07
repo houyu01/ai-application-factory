@@ -15,21 +15,31 @@ type PanelOptions = {
   setTaskButtonLoading: (button: HTMLButtonElement, task: GenerationTask | undefined, idleText: string) => void;
 };
 
-function renderCards(references: ReferenceNode[], assets: Map<string, DramaAsset>, tasks: GenerationTask[], escapeHtml: PanelOptions['escapeHtml'], showStatus: boolean) {
+function renderCards(shotId: string, references: ReferenceNode[], assets: Map<string, DramaAsset>, tasks: GenerationTask[], escapeHtml: PanelOptions['escapeHtml'], showStatus: boolean) {
   return renderDramaReferenceCards({
-    references, assets, tasks, escapeHtml, resolveMediaUrl,
+    shotId, references, assets, tasks, escapeHtml, resolveMediaUrl,
     kindLabel: dramaKindLabel, trashIcon: icon('trash'), showStatus,
+  });
+}
+
+function uniqueMaterialReferences(references: ReferenceNode[]) {
+  const seen = new Set<string>();
+  return references.filter(reference => {
+    const key = reference.asset_id || reference.image_url || reference.label;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
 /** Keep the warning and its actions synchronized with the selected shot's persisted references. */
 export function renderDramaShotReferencePanel(options: PanelOptions) {
   const { project, shot, referenceImageTask, escapeHtml, setTaskButtonLoading } = options;
-  const references = dramaShotReferences(project, shot);
+  const references = uniqueMaterialReferences(dramaShotReferences(project, shot));
   const assets = new Map(dramaAssets(project).map(asset => [asset.id, asset]));
   const referencePanel = document.querySelector<HTMLElement>('.drama-shot-editor .drama-reference-panel');
   const grid = referencePanel?.querySelector<HTMLElement>('.drama-reference-grid');
-  if (grid) grid.innerHTML = renderCards(references, assets, project.tasks || [], escapeHtml, true);
+  if (grid) grid.innerHTML = renderCards(shot.id, references, assets, project.tasks || [], escapeHtml, true);
   const existingStatus = referencePanel?.querySelector<HTMLElement>('[data-drama-reference-status]');
   if (!references.length) {
     existingStatus?.remove();
@@ -57,10 +67,10 @@ export function syncDramaShotReferenceCards(project: ApiProject, escapeHtml: (va
   const grid = document.querySelector<HTMLElement>('.drama-reference-grid');
   const selectedShot = project.shots?.find(item => item.id === dramaViewState.shotId) || project.shots?.[0];
   if (!grid || !selectedShot) return;
-  const references = dramaShotReferences(project, selectedShot);
+  const references = uniqueMaterialReferences(dramaShotReferences(project, selectedShot));
   const signature = references.map(node => { const asset = (project.assets || []).find(item => item.id === node.asset_id); return `${node.asset_id}:${node.asset_type}:${node.image_url || ''}:${asset?.status || ''}`; }).join('|');
   if (grid.dataset.referenceSignature === signature) return;
   grid.dataset.referenceSignature = signature;
   const assets = new Map(dramaAssets(project).map(asset => [asset.id, asset]));
-  grid.innerHTML = renderCards(references, assets, project.tasks || [], escapeHtml, false);
+  grid.innerHTML = renderCards(selectedShot.id, references, assets, project.tasks || [], escapeHtml, false);
 }
