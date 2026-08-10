@@ -1,5 +1,6 @@
 import type { DramaAsset, DramaPromptNode, GenerationTask } from './models.js';
 import { dramaAssetImageIsGenerating, dramaImageLoadingMarkup } from './drama_asset_image_state_ui.js';
+import { dramaReferenceAsset } from './drama_reference_asset.js';
 
 type DramaReferenceNode = Extract<DramaPromptNode, { type: 'reference' }>;
 
@@ -20,7 +21,7 @@ export function renderDramaReferenceCards(options: RenderOptions): string {
   const { shotId, references, assets, tasks, escapeHtml, resolveMediaUrl, kindLabel, trashIcon, showStatus } = options;
   if (!references.length) return '<div class="drama-reference-empty">暂无参考素材</div>';
   return references.map(reference => {
-    const asset = assets.get(reference.asset_id);
+    const asset = dramaReferenceAsset([...assets.values()], reference);
     const label = asset?.name || reference.label || '未命名素材';
     const imageUrl = resolveMediaUrl(asset?.image_url || reference.image_url);
     const typeLabel = kindLabel(reference.asset_type);
@@ -35,7 +36,7 @@ export function renderDramaReferenceCards(options: RenderOptions): string {
     return `<div class="drama-reference-card ${missing ? 'is-missing' : ''}">
       <span class="drama-reference-thumb">${image}</span>
       <span class="drama-reference-card-copy"><b>${escapeHtml(label)}</b><small>${escapeHtml(typeLabel + status)}</small></span>
-      <button type="button" class="drama-reference-remove" data-drama-remove-reference data-drama-shot-id="${escapeHtml(shotId)}" title="清空当前分镜的参考图和提示词" aria-label="清空当前分镜的参考图和提示词">${trashIcon}</button>
+      <button type="button" class="drama-reference-remove" data-drama-remove-reference data-drama-shot-id="${escapeHtml(shotId)}" data-drama-reference-asset-id="${escapeHtml(reference.asset_id)}" data-drama-reference-variant-id="${escapeHtml(reference.variant_id || '')}" title="移除该参考图" aria-label="移除${escapeHtml(label)}参考图">${trashIcon}</button>
     </div>`;
   }).join('');
 }

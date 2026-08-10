@@ -7,11 +7,9 @@
  * session and is submitted only when the creator generates the shot video.
  */
 import type { ApiProject, DramaShot } from './models.js';
+import { scheduleDramaEditorAutosave } from './drama_editor_autosave.js';
 
-type DurationRuntime = {
-  apiBaseUrl: string;
-  toast: (message: string) => void;
-};
+type DurationRuntime = object;
 
 const DURATION_OPTIONS = Array.from({ length: 13 }, (_, index) => index + 3);
 const VIDEO_COUNT_OPTIONS = [1, 2, 3];
@@ -64,7 +62,6 @@ export function setupDramaShotDurationControl(
 
   const select = durationCard.querySelector<HTMLSelectElement>('#drama-shot-duration');
   const countSelect = durationCard.querySelector<HTMLSelectElement>('#drama-shot-video-count');
-  const generateButton = document.querySelector<HTMLButtonElement>('#drama-generate-shot-video');
   if (countSelect) {
     countSelect.dataset.shotId = shot.id;
     countSelect.addEventListener('change', () => {
@@ -72,26 +69,5 @@ export function setupDramaShotDurationControl(
     });
   }
   if (!select) return;
-  select.addEventListener('change', async () => {
-    const durationSeconds = Number(select.value);
-    select.disabled = true;
-    if (generateButton) generateButton.disabled = true;
-    try {
-      const response = await fetch(`${runtime.apiBaseUrl}/projects/${project.id}/shots/${shot.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ duration_seconds: durationSeconds }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      shot.duration_seconds = durationSeconds;
-      runtime.toast(`分镜时长已设置为 ${durationSeconds}s`);
-    } catch (error) {
-      select.value = String(shot.duration_seconds || 10);
-      runtime.toast('分镜时长保存失败');
-      console.error(error);
-    } finally {
-      select.disabled = false;
-      if (generateButton) generateButton.disabled = false;
-    }
-  });
+  select.addEventListener('change', scheduleDramaEditorAutosave);
 }

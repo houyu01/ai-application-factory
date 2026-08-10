@@ -1,6 +1,7 @@
 /** Tiny shared SVG icon helper for consistent button sizing across vanilla TS views. */
 const paths: Record<string, string> = {
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  character: '<circle cx="12" cy="7.5" r="3.25"/><path d="M5.5 21v-1.5a6.5 6.5 0 0 1 13 0V21"/>',
   square: '<rect x="4" y="4" width="16" height="16" rx="2"/><rect x="8" y="8" width="8" height="8"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   refresh: '<path d="M21 12a9 9 0 0 1-9 9 9.8 9.8 0 0 1-6.7-2.7"/><path d="M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7"/><path d="M3 17v-5h5M21 7v5h-5"/>',
@@ -16,6 +17,7 @@ const paths: Record<string, string> = {
   history: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/>',
   warning: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5"/><path d="M12 18h.01"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>',
+  wrench: '<path d="M21 6.5a5 5 0 0 1-6.9 4.6L7 18.2a2.3 2.3 0 1 1-3.2-3.2l7.1-7.1A5 5 0 0 1 17.5 3l-3.1 3.1 3.5 3.5L21 6.5Z"/>',
 };
 
 export function icon(name: keyof typeof paths) {

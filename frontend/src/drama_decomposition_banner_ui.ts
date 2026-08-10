@@ -1,18 +1,25 @@
 /**
- * Project-level status banner for the initial script decomposition workflow.
+ * Project-level status banner for every screenplay-owning workflow.
  *
  * The detail toolbar observer calls this after a newly-created short drama is
  * rendered. It gives creators persistent feedback while the durable
- * `script_decomposition` task is extracting shots and reusable assets. The
+ * `script_decomposition` or `script_expansion` task is extracting shots and reusable assets. The
  * banner is removed as soon as that task no longer runs, including after a
- * recovered task finishes following a backend restart.
+ * recovered task finishes following a local worker restart.
  */
 import type { ApiProject, GenerationTask } from './models.js';
 
 const DECOMPOSITION_STEPS = ['等待执行', '扩写剧本', '拆解分镜', '保存编辑内容'];
+const EXPANDING_SCREENPLAY_TITLE = '扩写剧本(点击上方“剧本”查看实时剧本)';
 
-function scriptDecompositionTask(project: ApiProject | null) {
-  return [...(project?.tasks || [])].reverse().find(task => task.type === 'script_decomposition');
+function screenplayTask(project: ApiProject | null) {
+  const tasks = [...(project?.tasks || [])].reverse();
+  const active = tasks.find(task => task.status === '生成中'
+    && (task.type === 'script_decomposition' || task.type === 'script_expansion'));
+  if (active) return active;
+  const bootstrap = tasks.find(task => task.type === 'script_decomposition');
+  if (bootstrap?.status === '生成失败') return bootstrap;
+  return tasks.find(task => task.type === 'script_decomposition' || task.type === 'script_expansion');
 }
 
 /** Avoid creating DOM mutations when an observer rechecks unchanged task data. */
@@ -34,14 +41,28 @@ function currentStep(task: GenerationTask): number {
   return 0;
 }
 
-function generationCopy(project: ApiProject, task: GenerationTask) {
+function expandedScreenplay(project: ApiProject): string {
+  return project.expanded_script || '';
+}
+
+export function generationCopy(project: ApiProject, task: GenerationTask) {
+  if (task.type === 'script_expansion') {
+    return {
+      step: 1,
+      progress: taskProgress(task),
+      title: EXPANDING_SCREENPLAY_TITLE,
+      detail: task.error_message?.trim() || task.stage || '正在基于已保存的剧本继续扩写。',
+    };
+  }
   const step = currentStep(task);
   const waitingForWorker = project.queue_state === 'queued' && !task.stage && taskProgress(task) === 0;
   const queuePosition = project.queue_position || 1;
   return {
     step,
     progress: taskProgress(task),
-    title: `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}`,
+    title: step === 1
+      ? EXPANDING_SCREENPLAY_TITLE
+      : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}`,
     detail: task.error_message?.trim()
       || task.stage
       || (waitingForWorker
@@ -74,12 +95,12 @@ function syncProgressIndicator(banner: HTMLElement, step: number, progress: numb
   );
 }
 
-/** Synchronize the detail-page banner with the persisted initial task status. */
+/** Synchronize the detail-page banner with the newest persisted screenplay task. */
 export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry?: (projectId: string) => void) {
   const detail = document.querySelector<HTMLElement>('.drama-detail');
   if (!detail) return;
   const current = detail.querySelector<HTMLElement>('[data-drama-decomposition-banner]');
-  const task = scriptDecompositionTask(project);
+  const task = screenplayTask(project);
   const generating = task?.status === '生成中';
   const failed = task?.status === '生成失败';
   if (!task || (!generating && !failed)) {
@@ -87,11 +108,13 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
     return;
   }
   const copy = generationCopy(project!, task);
-  const titleText = failed ? '剧本生成失败' : copy.title;
+  const titleText = failed
+    ? task.type === 'script_expansion' ? '剧本扩写失败' : '剧本生成失败'
+    : copy.title;
   const detailText = failed
-    ? task.error_message?.trim() || '剧本生成失败，请检查语言模型配置后重试。'
+    ? task.error_message?.trim() || `${task.type === 'script_expansion' ? '剧本扩写' : '剧本生成'}失败，请检查语言模型配置后重试。`
     : copy.detail;
-  const previewText = String(task.input_snapshot?.expanded_script_preview || '');
+  const previewText = expandedScreenplay(project!);
   if (current) {
     const title = current.querySelector<HTMLElement>('.drama-decomposition-banner-title');
     const bannerDetail = current.querySelector<HTMLElement>('.drama-decomposition-banner-detail');
@@ -117,7 +140,7 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
   banner.className = `drama-decomposition-banner${failed ? ' failed' : ''}`;
   banner.dataset.dramaDecompositionBanner = 'true';
   banner.setAttribute('role', failed ? 'alert' : 'status');
-  banner.innerHTML = `<span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title"></span><p class="drama-decomposition-banner-detail"></p>${progressMarkup()}<pre class="drama-decomposition-banner-preview" aria-live="polite"></pre><button type="button" class="ghost compact" data-drama-retry-decomposition${failed ? '' : ' hidden'}>从已保存内容重试</button></div>`;
+  banner.innerHTML = `<span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title"></span><p class="drama-decomposition-banner-detail"></p>${progressMarkup()}<pre class="drama-decomposition-banner-preview" aria-live="polite"></pre><button type="button" class="ghost compact" data-drama-retry-decomposition${failed ? '' : ' hidden'}>重试</button></div>`;
   const title = banner.querySelector<HTMLElement>('.drama-decomposition-banner-title');
   const bannerDetail = banner.querySelector<HTMLElement>('.drama-decomposition-banner-detail');
   const preview = banner.querySelector<HTMLElement>('.drama-decomposition-banner-preview');

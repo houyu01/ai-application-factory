@@ -72,6 +72,11 @@ function selectedCards(state: CoverFormState, type: 'character' | 'scene' | 'cov
   }).join('');
 }
 
+function generateLabel(generating: boolean, failed: boolean) {
+  if (generating) return '<span class="generation-spinner"></span><span>生成中...</span>';
+  return failed ? '↻ 重试生成封面' : '生成封面';
+}
+
 function previewMarkup(project: ApiProject, cover?: DramaAsset) {
   const history = cover?.image_history || [];
   const count = Number(cover?.metadata?.count || 1);
@@ -109,7 +114,7 @@ function modalMarkup(state: CoverFormState) {
         </div>
         <aside class="drama-cover-preview"><h3>生成预览</h3><p>选择素材、比例和数量后提交生成。</p><div class="drama-cover-error" data-cover-error${failed ? '' : ' hidden'}>${rt().escapeHtml(failed)}</div><div data-cover-preview>${previewMarkup(project, cover)}</div></aside>
       </div>
-      <footer class="drama-cover-actions"><button type="button" class="ghost" data-cover-close>取消</button><button type="button" class="primary" data-cover-generate${generating ? ' disabled' : ''}>${generating ? '<span class="generation-spinner"></span><span>生成中...</span>' : '生成封面'}</button></footer>
+      <footer class="drama-cover-actions"><button type="button" class="ghost" data-cover-close>取消</button><button type="button" class="primary${generating ? ' is-loading' : ''}" data-cover-generate${generating ? ' disabled' : ''}>${generateLabel(generating, Boolean(failed))}</button></footer>
     </section>
   </div>`;
 }
@@ -217,7 +222,7 @@ async function generateCover() {
   const button = document.querySelector<HTMLButtonElement>('[data-cover-generate]');
   const name = (document.querySelector<HTMLInputElement>('#cover-name')?.value || '').trim();
   if (!name) { rt().toast('请填写封面名称'); return; }
-  if (button) { button.disabled = true; button.innerHTML = '<span class="generation-spinner"></span><span>生成中...</span>'; }
+  if (button) { button.disabled = true; button.classList.add('is-loading'); button.innerHTML = '<span class="generation-spinner"></span><span>生成中...</span>'; }
   try {
     const payload = await postJson<{ cover: DramaAsset; task: GenerationTask }>(`/projects/${openState.project.id}/covers/generate`, {
       name,
@@ -233,7 +238,7 @@ async function generateCover() {
     scheduleDramaTaskRefresh(openState.project);
     rt().toast('封面生成任务已创建');
   } catch (error) {
-    if (button) { button.disabled = false; button.textContent = '生成封面'; }
+    if (button) { button.disabled = false; button.classList.remove('is-loading'); button.textContent = '生成封面'; }
     const message = errorMessage(error);
     const errorBox = document.querySelector<HTMLElement>('[data-cover-error]');
     if (errorBox) { errorBox.hidden = false; errorBox.textContent = message; }
@@ -261,7 +266,7 @@ export function syncDramaCoverUi(project: ApiProject) {
   const failure = task?.status === '生成失败' ? task.error_message : cover?.status === '生成失败' ? '封面生成失败，请检查图像模型配置。' : '';
   if (error) { error.hidden = !failure; error.textContent = failure || ''; }
   const button = document.querySelector<HTMLButtonElement>('[data-cover-generate]');
-  if (button) { const generating = task?.status === '生成中' || cover?.status === '生成中'; button.disabled = generating; button.innerHTML = generating ? '<span class="generation-spinner"></span><span>生成中...</span>' : '生成封面'; }
+  if (button) { const generating = task?.status === '生成中' || cover?.status === '生成中'; button.disabled = generating; button.classList.toggle('is-loading', generating); button.innerHTML = generateLabel(generating, Boolean(failure)); }
 }
 
 function ensureCoverRailItem() {

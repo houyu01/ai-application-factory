@@ -1,5 +1,6 @@
 /** Shot management actions used by the episode/shot navigation column. */
 import { dramaViewState } from './drama_state.js';
+import { confirmAction } from './confirmation_modal.js';
 
 type DramaShotRuntime = {
   apiBaseUrl: string;
@@ -43,9 +44,9 @@ export async function addDramaShot(projectId: string, afterShotId: string) {
   }
 }
 
-/** Deletes a shot and asks the backend to cancel its active generation task. */
+/** Deletes a shot and asks the local Tauri service to cancel its active generation task. */
 export async function deleteDramaShot(projectId: string, shotId: string) {
-  if (!shotId || !window.confirm('删除当前分镜后，相关视频版本、占位图和生成任务都会被清理，确定继续吗？')) return;
+  if (!shotId || !await confirmAction({ title: '删除分镜？', description: '删除后，相关视频版本、占位图和生成任务都会被一并清理，且无法恢复。', confirmLabel: '删除分镜' })) return;
   try {
     const response = await fetch(`${rt().apiBaseUrl}/projects/${projectId}/shots/${shotId}`, { method: 'DELETE' });
     if (!response.ok) throw new Error(await readError(response));

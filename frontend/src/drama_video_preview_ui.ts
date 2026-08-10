@@ -1,6 +1,7 @@
 /** Synchronize the video-preview panel with the current shot's durable task. */
 import type { ApiProject, DramaShot, GenerationTask } from './models.js';
 import { icon } from './ui_icons.js';
+import { dramaShotVideoStatus } from './drama_video_history.js';
 
 function taskDetail(task?: GenerationTask) {
   if (!task) return '正在提交视频生成任务…';
@@ -46,6 +47,7 @@ export function syncDramaVideoPreviewNavigation(
   panel: HTMLElement | null | undefined,
   project: ApiProject,
   shot: DramaShot,
+  videoTask: GenerationTask | undefined,
   navigate: (shotId: string) => void,
 ) {
   const title = panel?.querySelector<HTMLElement>('.drama-video-panel .panel-title');
@@ -55,7 +57,7 @@ export function syncDramaVideoPreviewNavigation(
   heading.querySelector('p')?.remove();
   heading.classList.add('drama-video-heading');
   if (status) {
-    const currentStatus = shot.status || '未生成';
+    const currentStatus = dramaShotVideoStatus(shot, videoTask);
     status.className = `drama-video-status-indicator ${currentStatus === '生成中' ? 'running' : currentStatus === '生成失败' ? 'failed' : currentStatus === '生成成功' ? 'success' : ''}`;
     status.dataset.dramaVideoStatusIndicator = 'true';
     status.setAttribute('role', 'img');

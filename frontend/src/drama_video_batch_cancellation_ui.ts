@@ -16,7 +16,9 @@ type BatchCancellationResult = {
 let current: BatchCancellationOptions | null = null;
 
 function activeVideoTaskCount(project: ApiProject) {
-  return (project.tasks || []).filter(task => task.type === 'shot_video' && task.status === '生成中').length;
+  const videoCount = (project.tasks || []).filter(task => task.type === 'shot_video' && task.status === '生成中').length;
+  const serialActive = (project.tasks || []).some(task => task.type === 'serial_shot_video_batch' && task.status === '生成中');
+  return videoCount || serialActive ? Math.max(videoCount, 1) : 0;
 }
 
 async function readError(response: Response) {

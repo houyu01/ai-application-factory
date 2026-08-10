@@ -2,6 +2,7 @@
 import type { ApiProject, DramaAsset, DramaPromptNode, DramaShot, GenerationTask } from './models.js';
 import { dramaAssets, dramaKindLabel, dramaShotReferences, resolveMediaUrl } from './drama_core_ui.js';
 import { renderDramaReferenceCards } from './drama_reference_cards.js';
+import { dramaReferenceAsset, dramaReferenceKey } from './drama_reference_asset.js';
 import { dramaViewState } from './drama_state.js';
 import { icon } from './ui_icons.js';
 
@@ -25,7 +26,7 @@ function renderCards(shotId: string, references: ReferenceNode[], assets: Map<st
 function uniqueMaterialReferences(references: ReferenceNode[]) {
   const seen = new Set<string>();
   return references.filter(reference => {
-    const key = reference.asset_id || reference.image_url || reference.label;
+    const key = dramaReferenceKey(reference) || reference.image_url || reference.label;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -47,7 +48,7 @@ export function renderDramaShotReferencePanel(options: PanelOptions) {
   }
   if (!referencePanel) return;
   const missing = references.filter(reference => {
-    const asset = assets.get(reference.asset_id);
+    const asset = dramaReferenceAsset([...assets.values()], reference);
     return !asset || asset.status !== '生成成功' || !asset.image_url;
   });
   const status = existingStatus || document.createElement('div');
@@ -68,7 +69,7 @@ export function syncDramaShotReferenceCards(project: ApiProject, escapeHtml: (va
   const selectedShot = project.shots?.find(item => item.id === dramaViewState.shotId) || project.shots?.[0];
   if (!grid || !selectedShot) return;
   const references = uniqueMaterialReferences(dramaShotReferences(project, selectedShot));
-  const signature = references.map(node => { const asset = (project.assets || []).find(item => item.id === node.asset_id); return `${node.asset_id}:${node.asset_type}:${node.image_url || ''}:${asset?.status || ''}`; }).join('|');
+  const signature = references.map(node => { const asset = dramaReferenceAsset(project.assets || [], node); return `${dramaReferenceKey(node)}:${node.asset_type}:${node.image_url || ''}:${asset?.status || ''}`; }).join('|');
   if (grid.dataset.referenceSignature === signature) return;
   grid.dataset.referenceSignature = signature;
   const assets = new Map(dramaAssets(project).map(asset => [asset.id, asset]));

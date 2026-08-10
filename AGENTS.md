@@ -4,6 +4,15 @@ These rules apply to every change in this repository. They are intentionally
 tool-agnostic so Claude Code, Codex, Trae, and other IDE agents can follow the
 same contract.
 
+## Active product target: Tauri desktop
+
+- The active product is the local-first Tauri desktop application. Its
+  implementation boundary is `frontend/` (TypeScript UI) plus `src-tauri/`
+  (Rust commands, services, repositories, durable tasks, and providers).
+- Implement every new feature, product fix, UI change, generated code, and
+  refactor in the Tauri implementation. Do not introduce a separate local
+  backend runtime.
+
 ## Product compatibility
 
 - Preserve existing product behavior, API paths, response shapes, task states,
@@ -22,36 +31,34 @@ same contract.
 - Generated lockfiles and binary/media artifacts are exempt from this line
   limit, but source files that generate them are not.
 
-## Documentation requirements
+## Rust documentation requirements
 
-- Every server-side class must have a docstring explaining which business flow
-  calls it, the problem it solves, and the boundary it owns.
-- Every HTTP endpoint must have a docstring explaining the frontend behavior
-  that triggers it and what the endpoint changes or returns.
-- Every ORM table model must document the asset represented by the table.
-- Every ORM column must have a comment describing its meaning, when it is read,
-  and when it is changed.
+- Every public Rust service, repository, and durable worker type must document
+  the business flow that calls it, the problem it solves, and the boundary it
+  owns.
+- Every Tauri command or IPC route must document the frontend behavior that
+  triggers it and what it changes or returns.
+- Every persisted data model must document the asset represented by the table.
+- Every persisted field must have a nearby comment describing its meaning,
+  when it is read, and when it is changed.
 - Keep comments close to the code they describe; do not maintain a separate
   undocumented schema that can drift from the models.
 
-## Persistence and ORM
+## Persistence
 
-- Use SQLAlchemy 2.x declarative ORM models for all application tables and
-  database operations.
-- Each table must have one corresponding model in
-  `backend/src/infrastructure/orm_models/`.
-- Repositories own transactions and translate ORM objects into API dictionaries;
-  application services must not open database connections.
-- Do not add raw SQL strings to application or repository code. Raw SQL is only
-  allowed in an explicitly isolated, documented, one-time migration module.
-- Keep JSON-shaped product fields serialized through a typed repository helper,
-  not through ad-hoc SQL expressions.
+- Rust repositories own SQLite transactions and translate persisted rows into
+  API dictionaries; application services must not open database connections.
+- Keep SQL isolated in focused repository or documented one-time migration
+  modules. Preserve existing table names and JSON compatibility contracts.
+- Keep JSON-shaped product fields serialized through typed helpers, not
+  ad-hoc string manipulation.
 
-## API and service boundaries
+## Command and service boundaries
 
-- Routers validate HTTP input and delegate to application services or gateways.
+- Tauri commands and the local IPC router validate input and delegate to
+  application services or gateways.
 - Gateways compose use cases; services coordinate business rules and tasks;
-  repositories persist data; LLM clients call providers.
+  repositories persist data; provider clients call external services.
 - Long-running generation must be represented by a durable database task before
   work starts, so refreshes and process restarts can recover the task.
 - A refactor must preserve task status transitions and idempotent enqueue
@@ -59,8 +66,8 @@ same contract.
 
 ## Verification
 
-- Run backend tests, frontend type-checking, compilation checks, and
-  `git diff --check` for relevant changes.
+- Run frontend type-checking, Rust formatting and compilation checks, relevant
+  Rust/frontend tests, and `git diff --check` for relevant changes.
 - Check source line counts and inspect the diff before handing off work.
 - Never commit secrets, local `.env` files, SQLite databases, media output, or
   generated build artifacts.

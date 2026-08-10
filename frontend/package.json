@@ -1,11 +1,17 @@
 {
   "name": "@ai-application-factory/frontend",
   "private": true,
+  "author": "houyu.hy <785798835@qq.com>",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test"
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0"
   },
   "devDependencies": {
     "vite": "^6.0.0",

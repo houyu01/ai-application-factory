@@ -1,5 +1,0 @@
-services:
-  backend:
-    build: ./backend
-    ports:
-      - "8090:8090"

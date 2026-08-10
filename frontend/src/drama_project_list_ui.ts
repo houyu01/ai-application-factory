@@ -72,10 +72,16 @@ function projectStatusText(project: Project, locale: Locale) {
     : `生成中，当前排在第${position}位`;
 }
 
+function projectStatusMarkup(project: Project, locale: Locale) {
+  const status = `<span class="status ${isGenerating(project) ? 'running' : ''}">${isGenerating(project) ? '◌ ' : ''}${projectStatusText(project, locale)}</span>`;
+  const restart = project.status === '已取消' ? `<button type="button" class="project-restart-button" data-restart-project="${project.id}">${locale === 'en' ? 'Restart' : '重新开始'}</button>` : '';
+  return restart ? `<div class="project-status-row">${status}${restart}</div>` : status;
+}
+
 function projectCard(project: Project, options: DramaListOptions) {
   const { escapeHtml, locale, resolveMediaUrl } = options;
   const cover = project.coverUrl ? `<img class="project-cover-background" src="${escapeHtml(resolveMediaUrl(project.coverUrl))}" alt="" aria-hidden="true" />` : '';
-  return `<article class="project-card" data-project="${project.id}">${cover}<div class="card-top"><h2>${escapeHtml(project.name)}</h2><span class="status ${isGenerating(project) ? 'running' : ''}">${isGenerating(project) ? '◌ ' : ''}${escapeHtml(projectStatusText(project, locale))}</span><div class="tags"><span>${escapeHtml(project.ratio)}</span><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.theme)}</span></div></div><div class="metrics"><div><strong>${project.scenes}</strong><small>${locale === 'en' ? 'Shots' : '分镜'}</small></div><div><strong>${project.characters}</strong><small>${locale === 'en' ? 'Roles' : '角色'}</small></div><div><strong>${project.locations}</strong><small>${locale === 'en' ? 'Scenes' : '场景'}</small></div><div><strong>${project.props}</strong><small>${locale === 'en' ? 'Props' : '道具'}</small></div></div><div class="card-foot"><span>${escapeHtml(project.createdAt)}</span><button type="button" class="delete-card-button" data-delete-project="${project.id}">删除</button></div></article>`;
+  return `<article class="project-card" data-project="${project.id}">${cover}<div class="card-top"><h2>${escapeHtml(project.name)}</h2>${projectStatusMarkup(project, locale)}<div class="tags"><span>${escapeHtml(project.ratio)}</span><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.theme)}</span></div></div><div class="metrics"><div><strong>${project.scenes}</strong><small>${locale === 'en' ? 'Shots' : '分镜'}</small></div><div><strong>${project.characters}</strong><small>${locale === 'en' ? 'Roles' : '角色'}</small></div><div><strong>${project.locations}</strong><small>${locale === 'en' ? 'Scenes' : '场景'}</small></div><div><strong>${project.props}</strong><small>${locale === 'en' ? 'Props' : '道具'}</small></div></div><div class="card-foot"><span>${escapeHtml(project.createdAt)}</span><button type="button" class="delete-card-button" data-delete-project="${project.id}">删除</button></div></article>`;
 }
 
 export function dramaProjectListPage(options: DramaListOptions) {
