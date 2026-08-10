@@ -1,6 +1,8 @@
 /** Interactive-game list, editor, graph, and playback UI. */
 
 import type { ApiGame, Game, GameEdge, GameNode, Locale, ModelKind, ModelSettings } from './models.js';
+import { icon } from './ui_icons.js';
+import { notifyModelTaskFailures } from './model_task_failure_toast.js';
 
 type GameSession = { id: string; game_id: string; current_node_id: string; status: string; path: { edge_id: string; option_text: string }[]; current_node: GameNode; choices: GameEdge[] };
 type GameRuntime = {
@@ -26,6 +28,7 @@ export const interactiveGames: Game[] = [];
 export function configureGameRuntime(value: GameRuntime) { runtime = value; }
 
 function gameEngine(platform: string) { return platform === 'Steam游戏' ? 'Unity' : 'Cocos Creator'; }
+async function responseError(response: Response) { const body = await response.json().catch(() => null) as { detail?: unknown; message?: unknown } | null; return typeof body?.detail === 'string' ? body.detail : typeof body?.message === 'string' ? body.message : `HTTP ${response.status}`; }
 function gameFromApi(game: ApiGame): Game { return { ...game, nodes: game.nodes || [], edges: game.edges || [], assets: game.assets || [] }; }
 function gameCard(game: Game) {
   const count = game.node_count ?? game.nodes?.length ?? 0;
@@ -80,14 +83,14 @@ export function openGameModal() {
     button.textContent = '创建中…';
     try {
       const response = await fetch(`${rt().apiBaseUrl}/games`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, script, platform: value('game-platform'), style: value('game-style'), success_ending_count: Number(value('game-success')), failure_ending_count: Number(value('game-failure')), branch_min: branchMin, branch_max: branchMax, node_duration_min: durationMin, node_duration_max: durationMax, language_model: value('game-language-model'), multimodal_model: value('game-multimodal-model'), video_model: value('game-video-model') }) });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) throw new Error(await responseError(response));
       const game = gameFromApi(await response.json() as ApiGame);
       interactiveGames.unshift(game);
       close();
       const navigateToGameDetail = rt().navigateToGameDetail;
       if (navigateToGameDetail) navigateToGameDetail(game.id);
       else await gameDetail(game.id, game);
-    } catch (error) { button.disabled = false; button.textContent = rt().ui('createGame'); rt().toast?.('创建失败，请确认后端已启动'); console.error(error); }
+    } catch (error) { button.disabled = false; button.textContent = rt().ui('createGame'); rt().toast?.(`创建失败：${error instanceof Error ? error.message : '请稍后重试'}`); console.error(error); }
   });
 }
 
@@ -104,7 +107,8 @@ function graphMarkup(game: Game) {
 function gameDetailMarkup(game: Game) {
   const nodes = game.nodes || [];
   const assets = game.assets || [];
-  return `<div class="game-detail"><button class="back" id="game-back">← 返回游戏列表</button><header><div><div class="eyebrow">INTERACTIVE GAME / ${rt().escapeHtml(game.name)}</div><h1>${rt().escapeHtml(game.name)}</h1><p>${rt().ui('gameEditorDescription')}</p><div class="game-meta"><span>${rt().escapeHtml(game.platform)}</span><span>${rt().escapeHtml(game.style)}</span><span>${gameEngine(game.platform)}</span><span>语言：${rt().escapeHtml(game.language_model)}</span><span>图像：${rt().escapeHtml(game.multimodal_model)}</span><span>视频：${rt().escapeHtml(game.video_model)}</span></div></div><div class="header-actions"><button class="ghost" id="game-models">模型配置</button><button class="primary" id="game-play">试玩游戏</button><button class="ghost" id="game-refresh">刷新图谱</button><button class="ghost danger-button" id="game-delete">删除游戏</button><button class="primary" id="game-add-edge">新增选项</button></div></header><div class="game-editor-layout"><section class="panel game-assets-panel"><div class="panel-title"><h2>基础组成元素</h2><span>${assets.length} 个元素</span></div>${assets.map(asset => `<div class="asset-row"><div class="asset-thumb ${asset.type === 'scene' ? 'green' : ''}">${asset.type === 'character' ? '♙' : asset.type === 'scene' ? '✦' : '◆'}</div><div><b>${rt().escapeHtml(asset.name)}</b><span>${rt().escapeHtml(asset.type)} · ${rt().escapeHtml(asset.status)}</span><p>${rt().escapeHtml(asset.prompt)}</p></div></div>`).join('')}</section><section class="panel game-canvas-panel"><div class="panel-title"><div><h2>分支编辑画布</h2><p>${nodes.length} 个视频节点 · ${game.edges?.length || 0} 条选择边</p></div><span class="status ${game.status === '生成中' ? 'running' : ''}">${rt().escapeHtml(game.status)}</span></div><div class="game-canvas-wrap">${nodes.length ? graphMarkup(game) : '<div class="game-generating"><div class="empty-icon">◌</div><p>分支图谱生成中，请稍候…</p></div>'}</div></section><section class="panel game-inspector" id="game-inspector"><div class="inspector-empty"><div class="empty-icon">⌁</div><h3>选择一个节点或选项</h3><p>点击中央画布中的节点配置视频，点击选项边配置选择文案。</p></div></section></div></div>`;
+  const assetRows = assets.map(asset => `<div class="asset-row"><div class="asset-thumb ${asset.type === 'scene' ? 'green' : ''}">${asset.type === 'character' ? icon('character') : asset.type === 'scene' ? '✦' : '◆'}</div><div><b>${rt().escapeHtml(asset.name)}</b><span>${rt().escapeHtml(asset.type)} · ${rt().escapeHtml(asset.status)}</span><p>${rt().escapeHtml(asset.prompt)}</p></div></div>`).join('');
+  return `<div class="game-detail"><button class="back" id="game-back">← 返回游戏列表</button><header><div><div class="eyebrow">INTERACTIVE GAME / ${rt().escapeHtml(game.name)}</div><h1>${rt().escapeHtml(game.name)}</h1><p>${rt().ui('gameEditorDescription')}</p><div class="game-meta"><span>${rt().escapeHtml(game.platform)}</span><span>${rt().escapeHtml(game.style)}</span><span>${gameEngine(game.platform)}</span><span>语言：${rt().escapeHtml(game.language_model)}</span><span>图像：${rt().escapeHtml(game.multimodal_model)}</span><span>视频：${rt().escapeHtml(game.video_model)}</span></div></div><div class="header-actions"><button class="ghost" id="game-models">模型配置</button><button class="primary" id="game-play">试玩游戏</button><button class="ghost" id="game-refresh">刷新图谱</button><button class="ghost danger-button" id="game-delete">删除游戏</button><button class="primary" id="game-add-edge">新增选项</button></div></header><div class="game-editor-layout"><section class="panel game-assets-panel"><div class="panel-title"><h2>基础组成元素</h2><span>${assets.length} 个元素</span></div>${assetRows}</section><section class="panel game-canvas-panel"><div class="panel-title"><div><h2>分支编辑画布</h2><p>${nodes.length} 个视频节点 · ${game.edges?.length || 0} 条选择边</p></div><span class="status ${game.status === '生成中' ? 'running' : ''}">${rt().escapeHtml(game.status)}</span></div><div class="game-canvas-wrap">${nodes.length ? graphMarkup(game) : '<div class="game-generating"><div class="empty-icon">◌</div><p>分支图谱生成中，请稍候…</p></div>'}</div></section><section class="panel game-inspector" id="game-inspector"><div class="inspector-empty"><div class="empty-icon">⌁</div><h3>选择一个节点或选项</h3><p>点击中央画布中的节点配置视频，点击选项边配置选择文案。</p></div></section></div></div>`;
 }
 
 let activeSession: GameSession | null = null;
@@ -120,6 +124,7 @@ export async function gameDetail(id: string, initial?: Game, retry = 0) {
   let game = initial;
   try { const response = await fetch(`${rt().apiBaseUrl}/games/${id}`); if (response.ok) game = gameFromApi(await response.json() as ApiGame); } catch (error) { if (!game) { rt().toast?.('游戏详情加载失败'); console.error(error); return; } }
   if (!game) return;
+  notifyModelTaskFailures(game.tasks || [], message => rt().toast?.(message));
   main.innerHTML = gameDetailMarkup(game);
   bindGameEditor(game);
   scheduleTaskRefresh(game);
@@ -136,7 +141,7 @@ function selectNode(game: Game, nodeId: string) {
   const generate = inspector.querySelector<HTMLButtonElement>('#node-generate');
   if (generate) { rt().setGenerationButtonLoading(generate, Boolean(task?.status === '生成中' || node.status === '生成中'), '生成节点视频'); if (task?.status === '生成中') generate.textContent = `⟳ 生成节点视频 ${task.progress || 0}%`; }
   inspector.querySelector('#node-save')?.addEventListener('click', async () => { await fetch(`${rt().apiBaseUrl}/games/${game.id}/nodes/${nodeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: (inspector.querySelector('#node-title') as HTMLInputElement).value, original_text: (inspector.querySelector('#node-original') as HTMLTextAreaElement).value, prompt: (inspector.querySelector('#node-prompt') as HTMLTextAreaElement).value, duration_seconds: Number((inspector.querySelector('#node-duration') as HTMLInputElement).value) }) }); rt().toast?.('节点已保存'); await gameDetail(game.id); });
-  inspector.querySelector('#node-generate')?.addEventListener('click', async () => { const response = await fetch(`${rt().apiBaseUrl}/games/${game.id}/nodes/${nodeId}/video`, { method: 'POST' }); if (response.ok) { rt().toast?.('节点视频任务已创建'); await gameDetail(game.id); } else rt().toast?.('节点视频任务创建失败'); });
+  inspector.querySelector('#node-generate')?.addEventListener('click', async () => { try { const response = await fetch(`${rt().apiBaseUrl}/games/${game.id}/nodes/${nodeId}/video`, { method: 'POST' }); if (!response.ok) throw new Error(await responseError(response)); rt().toast?.('节点视频任务已创建'); await gameDetail(game.id); } catch (error) { rt().toast?.(`节点视频任务创建失败：${error instanceof Error ? error.message : '请稍后重试'}`); console.error(error); } });
 }
 
 function openGameModelSelectionModal(game: Game) {
@@ -156,11 +161,11 @@ function openGameModelSelectionModal(game: Game) {
     button.disabled = true;
     try {
       const response = await fetch(`${rt().apiBaseUrl}/games/${game.id}/models`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ language_model: value('game-model-language'), multimodal_model: value('game-model-multimodal'), video_model: value('game-model-video') }) });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) throw new Error(await responseError(response));
       close();
       rt().toast?.('互动游戏模型配置已保存');
       await gameDetail(game.id);
-    } catch (error) { button.disabled = false; rt().toast?.('模型配置保存失败'); console.error(error); }
+    } catch (error) { button.disabled = false; rt().toast?.(`模型配置保存失败：${error instanceof Error ? error.message : '请稍后重试'}`); console.error(error); }
   });
 }
 

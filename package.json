@@ -1,12 +1,17 @@
 {
   "name": "ai-application-factory",
   "private": true,
+  "author": "houyu.hy <785798835@qq.com>",
+  "license": "MIT",
   "workspaces": ["frontend"],
   "scripts": {
-    "dev": "./scripts/start-all.sh",
-    "dev:backend": "./scripts/start-backend.sh",
-    "dev:frontend": "./scripts/start-frontend.sh",
+    "dev": "tauri dev",
+    "dev:desktop": "tauri dev",
+    "build:desktop": "tauri build --bundles app,dmg && node scripts/promote-dmg.mjs",
     "typecheck": "npm run typecheck --workspace frontend",
     "test": "npm test --workspace frontend"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
   }
 }

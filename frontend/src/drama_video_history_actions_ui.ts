@@ -1,7 +1,10 @@
 /** Render durable video task records as the single short-drama video history. */
-import type { ApiProject, DramaShot, DramaShotVersion } from './models.js';
+import type { ApiProject, DramaShot } from './models.js';
 import { dramaViewState } from './drama_state.js';
 import { icon } from './ui_icons.js';
+import { confirmAction } from './confirmation_modal.js';
+import { dramaVideoHistoryRecords, type DramaVideoHistoryRecord } from './drama_video_history.js';
+import { openDramaVideoRefinementModal } from './drama_video_refinement_ui.js';
 
 type VideoHistoryActionOptions = {
   apiBaseUrl: string;
@@ -11,16 +14,7 @@ type VideoHistoryActionOptions = {
   toast: (message: string) => void;
 };
 
-type VideoHistoryRecord = {
-  id: string;
-  createdAt?: string;
-  error?: string | null;
-  progress?: number;
-  providerTaskId?: string | null;
-  status: string;
-  url?: string | null;
-  versionNo?: number;
-};
+type VideoHistoryRecord = DramaVideoHistoryRecord;
 
 function selectedShot(project: ApiProject): DramaShot | undefined {
   return project.shots?.find(item => item.id === dramaViewState.shotId) || project.shots?.[0];
@@ -37,39 +31,13 @@ function isFailed(record: VideoHistoryRecord): boolean {
   return record.status === '生成失败';
 }
 
-function historyRecords(shot: DramaShot): VideoHistoryRecord[] {
-  const versions = shot.versions || [];
-  const knownKeys = new Set<string>();
-  const records = versions.map(version => versionRecord(version, knownKeys));
-  for (const video of shot.historical_videos || []) {
-    const id = String(video.id || video.task_id || video.url || '');
-    const key = String(video.task_id || video.url || id);
-    if (!id || knownKeys.has(key)) continue;
-    knownKeys.add(key);
-    records.push({
-      id,
-      createdAt: video.generated_at,
-      status: video.url ? '生成成功' : '未生成',
-      url: video.url,
-    });
-  }
-  return records.sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''));
+/** Match a history record to the video currently rendered in the preview panel. */
+function isSelectedRecord(options: VideoHistoryActionOptions, record: VideoHistoryRecord): boolean {
+  if (!record.url) return false;
+  if (dramaViewState.videoUrl !== null) return dramaViewState.videoUrl === record.url;
+  return document.querySelector<HTMLVideoElement>('#drama-video-player')?.getAttribute('src') === options.resolveMediaUrl(record.url);
 }
 
-function versionRecord(version: DramaShotVersion, knownKeys: Set<string>): VideoHistoryRecord {
-  const id = String(version.id || version.task_id || version.video_url || '');
-  knownKeys.add(String(version.task_id || version.video_url || id));
-  return {
-    id,
-    createdAt: version.completed_at || version.created_at,
-    error: version.error_message,
-    progress: version.progress,
-    providerTaskId: version.provider_task_id,
-    status: version.status,
-    url: version.video_url,
-    versionNo: version.version_no,
-  };
-}
 
 async function deleteHistoryRecord(
   options: VideoHistoryActionOptions,
@@ -77,7 +45,7 @@ async function deleteHistoryRecord(
   record: VideoHistoryRecord,
   button: HTMLButtonElement,
 ) {
-  if (!window.confirm('删除这条视频历史吗？对应视频文件和生成记录会一并删除，且无法恢复。')) return;
+  if (!await confirmAction({ title: '删除视频历史？', description: '对应视频文件和生成记录会一并删除，且无法恢复。', confirmLabel: '删除视频' })) return;
   button.disabled = true;
   try {
     const response = await fetch(
@@ -152,7 +120,7 @@ function createHistoryEntry(
 ): HTMLElement {
   const entry = document.createElement('article');
   entry.className = `drama-history-entry ${isFailed(record) ? 'is-failed' : ''}`;
-  entry.classList.toggle('is-selected', Boolean(record.url && dramaViewState.videoUrl === record.url));
+  entry.classList.toggle('is-selected', isSelectedRecord(options, record));
   const preview = document.createElement(record.url && !isFailed(record) ? 'button' : 'div');
   preview.className = 'drama-history-preview';
   if (preview instanceof HTMLButtonElement) {
@@ -194,8 +162,9 @@ function createHistoryEntry(
     attachHistoryErrorTooltip(tip, errorMessage);
     actions.append(tip);
   }
+  let download: HTMLAnchorElement | null = null;
   if (record.url) {
-    const download = document.createElement('a');
+    download = document.createElement('a');
     download.className = 'drama-history-download';
     download.href = options.resolveMediaUrl(record.url);
     download.download = 'drama-video.mp4';
@@ -204,7 +173,24 @@ function createHistoryEntry(
     download.title = '下载视频';
     download.setAttribute('aria-label', '下载视频');
     download.innerHTML = icon('download');
-    actions.append(download);
+  }
+  let refine: HTMLButtonElement | null = null;
+  if (record.url && record.status === '生成成功') {
+    refine = document.createElement('button');
+    refine.type = 'button';
+    refine.className = 'drama-history-refine';
+    refine.title = '微调视频';
+    refine.setAttribute('aria-label', '微调视频');
+    refine.innerHTML = icon('wrench');
+    refine.addEventListener('click', () => openDramaVideoRefinementModal({
+      apiBaseUrl: options.apiBaseUrl,
+      project: options.project!,
+      record,
+      resolveMediaUrl: options.resolveMediaUrl,
+      reloadProject: options.loadDramaDetail,
+      shot,
+      toast: options.toast,
+    }));
   }
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -214,7 +200,15 @@ function createHistoryEntry(
   remove.setAttribute('aria-label', remove.title);
   remove.innerHTML = icon('trash');
   if (record.id) remove.addEventListener('click', () => void deleteHistoryRecord(options, shot, record, remove));
-  actions.append(remove);
+  if (refine && download) {
+    const successActions = document.createElement('div');
+    successActions.className = 'drama-history-success-actions';
+    successActions.append(remove, download, refine);
+    actions.append(successActions);
+  } else {
+    if (download) actions.append(download);
+    actions.append(remove);
+  }
   entry.append(preview, details, actions);
   return entry;
 }
@@ -222,7 +216,7 @@ function createHistoryEntry(
 function historySignature(shot: DramaShot, records: VideoHistoryRecord[]): string {
   return JSON.stringify({
     shotId: shot.id,
-    records: records.map(record => [record.id, record.status, record.url, record.error, record.progress, record.createdAt]),
+    records: records.map(record => [record.id, record.status, record.url, record.error, record.progress, record.refinementPrompt, record.createdAt]),
   });
 }
 
@@ -232,7 +226,7 @@ export function syncDramaVideoHistoryActions(options: VideoHistoryActionOptions)
   const project = options.project;
   const shot = project && selectedShot(project);
   if (!history || !project || !shot) return;
-  const records = historyRecords(shot);
+  const records = dramaVideoHistoryRecords(shot);
   const signature = historySignature(shot, records);
   if (history.dataset.dramaHistorySignature === signature) return;
   history.dataset.dramaHistorySignature = signature;

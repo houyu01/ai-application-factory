@@ -1,8 +1,10 @@
 import type { ApiProject, GenerationTask } from './models.js';
+import { notifyModelTaskFailures } from './model_task_failure_toast.js';
 
 type DramaTaskPollingRuntime = {
   apiBaseUrl: string;
   getProject: () => ApiProject | null;
+  toast: (message: string) => void;
   onStatusUpdate: (tasks: GenerationTask[], completed: GenerationTask[]) => Promise<void> | void;
 };
 
@@ -76,6 +78,7 @@ async function pollDramaTaskStatuses(id: string) {
     cursor = payload.server_time || cursor;
     const tasks = payload.tasks || [];
     const completed = tasks.filter(task => task.status !== '生成中');
+    notifyModelTaskFailures(completed, runtime.toast);
     await runtime.onStatusUpdate(tasks, completed);
   } catch (error) {
     console.warn('短剧任务状态轮询失败', error);

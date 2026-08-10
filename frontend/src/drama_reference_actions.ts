@@ -1,4 +1,8 @@
 import { dramaViewState } from './drama_state.js';
+import { dramaPromptNodes, readDramaPromptNodes, serializeDramaPromptNodes, setGenerationButtonLoading } from './drama_core_ui.js';
+import { dramaReferenceAssetIds, removeDramaReference } from './drama_reference_removal.js';
+import type { ApiProject, DramaPromptNode } from './models.js';
+import { flushDramaEditorAutosave } from './drama_editor_autosave.js';
 
 type Runtime = {
   apiBaseUrl: string;
@@ -12,7 +16,22 @@ function responseDetail(response: Response): Promise<string> {
     .catch(() => `HTTP ${response.status}`);
 }
 
-/** Clears the current shot's reference selection and prompt without deleting source assets. */
+function editablePromptNodes(project: ApiProject, shotId: string): DramaPromptNode[] {
+  const editor = document.querySelector<HTMLElement>('.drama-rich-prompt-editor');
+  if (editor) {
+    const nodes = readDramaPromptNodes(editor);
+    if (nodes.length) return nodes;
+  }
+  const promptInput = document.querySelector<HTMLTextAreaElement>('#drama-shot-prompt');
+  try {
+    const stored = JSON.parse(promptInput?.dataset.promptRich || '[]');
+    if (Array.isArray(stored) && stored.length) return stored as DramaPromptNode[];
+  } catch { /* Use the persisted rich prompt below. */ }
+  const shot = project.shots?.find(item => item.id === shotId);
+  return shot ? dramaPromptNodes(project, shot) : [];
+}
+
+/** Removes one current-shot reference while retaining all other prompt content and source assets. */
 export function configureDramaReferenceRemoval(runtime: Runtime) {
   document.addEventListener('click', event => {
     const target = event.target instanceof Element ? event.target : null;
@@ -20,19 +39,29 @@ export function configureDramaReferenceRemoval(runtime: Runtime) {
     const projectId = dramaViewState.projectId;
     if (!button || !projectId || button.disabled) return;
     const shotId = button.dataset.dramaShotId || dramaViewState.shotId;
-    if (!shotId) return;
+    const referenceAssetId = button.dataset.dramaReferenceAssetId;
+    const referenceVariantId = button.dataset.dramaReferenceVariantId;
+    if (!shotId || !referenceAssetId) return;
     event.preventDefault();
     event.stopPropagation();
     button.disabled = true;
     button.setAttribute('aria-busy', 'true');
     void (async () => {
+      await flushDramaEditorAutosave();
+      const projectResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}`);
+      if (!projectResponse.ok) throw new Error(await responseDetail(projectResponse));
+      const project = await projectResponse.json() as ApiProject;
+      if (!project.shots?.some(shot => shot.id === shotId)) throw new Error('当前分镜不存在');
+      const currentNodes = editablePromptNodes(project, shotId);
+      const remainingNodes = removeDramaReference(currentNodes, referenceAssetId, referenceVariantId);
+      const prompt = serializeDramaPromptNodes(project, remainingNodes);
       const saveResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shotId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: '', prompt_rich: [], reference_asset_ids: [] }),
+        body: JSON.stringify({ prompt: prompt.prompt, prompt_rich: prompt.nodes, reference_asset_ids: dramaReferenceAssetIds(prompt.nodes) }),
       });
       if (!saveResponse.ok) throw new Error(await responseDetail(saveResponse));
       await runtime.reloadProject(projectId);
-      runtime.notify('已清空当前分镜的参考图和提示词');
+      runtime.notify('已移除当前分镜中的参考图');
     })().catch(error => {
       console.error(error);
       runtime.notify(`移除参考图失败：${error instanceof Error ? error.message : '请重试'}`);
@@ -82,9 +111,8 @@ export function configureDramaReferenceRemoval(runtime: Runtime) {
     event.stopImmediatePropagation();
     const title = document.querySelector<HTMLInputElement>('#drama-shot-title')?.value || '';
     const originalText = document.querySelector<HTMLTextAreaElement>('#drama-shot-original')?.value || '';
-    const idleText = button.textContent || '✣ 生成提示词';
-    button.disabled = true;
-    button.setAttribute('aria-busy', 'true');
+    const idleText = button.dataset.taskIdleText || '✣ 生成提示词';
+    setGenerationButtonLoading(button, true, idleText);
     void (async () => {
       const saveResponse = await fetch(`${runtime.apiBaseUrl}/projects/${projectId}/shots/${shotId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -97,8 +125,7 @@ export function configureDramaReferenceRemoval(runtime: Runtime) {
       await runtime.reloadProject(projectId);
     })().catch(error => {
       console.error(error);
-      button.disabled = false;
-      button.textContent = idleText;
+      setGenerationButtonLoading(button, false, idleText);
       runtime.notify(`提示词生成失败：${error instanceof Error ? error.message : '请重试'}`);
     }).finally(() => button.removeAttribute('aria-busy'));
   }, true);

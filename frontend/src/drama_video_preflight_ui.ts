@@ -1,6 +1,8 @@
 /** Block video generation until the selected shot's prompt and references are usable. */
-import type { ApiProject, DramaShot, GenerationTask } from './models.js';
+import type { ApiProject, DramaPromptNode, DramaShot, GenerationTask } from './models.js';
 import { dramaShotVideoGenerationCount } from './drama_shot_duration_ui.js';
+import { dramaReferenceAsset } from './drama_reference_asset.js';
+import { flushDramaEditorAutosave, hasUnsavedDramaEditorChanges } from './drama_editor_autosave.js';
 
 type VideoPreflightRuntime = {
   apiBaseUrl: string;
@@ -11,16 +13,23 @@ type VideoPreflightRuntime = {
 };
 
 let runtime: VideoPreflightRuntime | null = null;
+const SAVE_VIDEO_CHANGES_MESSAGE = '最近更新过提示词或参考图，请确认后点击保存再生成视频';
 
-function referencedAssetIds(shot: DramaShot) {
+function referencedAssets(shot: DramaShot): Pick<Extract<DramaPromptNode, { type: 'reference' }>, 'asset_id' | 'variant_id'>[] {
   const fromPrompt = (shot.prompt_rich || [])
-    .flatMap(node => node.type === 'reference' ? [node.asset_id] : []);
-  return [...new Set(fromPrompt.length ? fromPrompt : shot.reference_asset_ids || [])];
+    .flatMap(node => node.type === 'reference' ? [{ asset_id: node.asset_id, variant_id: node.variant_id }] : []);
+  return fromPrompt.length ? fromPrompt : (shot.reference_asset_ids || []).map(asset_id => ({ asset_id }));
 }
 
 function hasBoundaryFrames(shot: DramaShot) {
   const frames = shot.first_last_frames;
   return Boolean(frames?.first?.url || frames?.last?.url);
+}
+
+function hasUnsavedVideoInputs(shot: DramaShot) {
+  const originalText = document.querySelector<HTMLTextAreaElement>('#drama-shot-original');
+  const editor = document.querySelector<HTMLElement>('.drama-rich-prompt-editor');
+  return hasUnsavedDramaEditorChanges() || Boolean(originalText && originalText.value !== shot.original_text) || editor?.dataset.videoInputsDirty === 'true';
 }
 
 /** Mirror the durable version immediately so the history can show its pending card. */
@@ -43,11 +52,10 @@ function addPendingVideoVersion(shot: DramaShot, task: GenerationTask) {
 
 function prerequisiteIssues(project: ApiProject, shot: DramaShot) {
   const issues: string[] = [];
-  if (!shot.prompt.trim()) issues.push('请先生成或保存分镜提示词。');
-  const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
-  referencedAssetIds(shot).forEach(assetId => {
-    const asset = assets.get(assetId);
-    if (!asset) issues.push(`引用素材“${assetId}”已不存在。`);
+  if (hasUnsavedVideoInputs(shot) || !shot.prompt.trim()) issues.push(SAVE_VIDEO_CHANGES_MESSAGE);
+  referencedAssets(shot).forEach(reference => {
+    const asset = dramaReferenceAsset(project.assets || [], reference);
+    if (!asset) issues.push(`引用素材“${reference.asset_id}”已不存在。`);
     else if (asset.status === '生成中') issues.push(`素材“${asset.name}”的图片仍在生成中。`);
     else if (asset.status === '生成失败') issues.push(`素材“${asset.name}”的图片生成失败，请重新生成或上传。`);
     else if (asset.status !== '生成成功' || !asset.image_url) issues.push(`素材“${asset.name}”尚未生成图片。`);
@@ -126,7 +134,12 @@ export function configureDramaVideoPreflight(value: VideoPreflightRuntime) {
   runtime = value;
 }
 
-document.addEventListener('click', event => {
+document.addEventListener('input', event => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (target?.matches('.drama-rich-prompt-editor')) target.dataset.videoInputsDirty = 'true';
+}, true);
+
+document.addEventListener('click', async event => {
   const target = event.target instanceof HTMLElement ? event.target : null;
   const button = target?.closest<HTMLButtonElement>('#drama-generate-shot-video');
   const project = runtime?.getActiveProject();
@@ -134,6 +147,13 @@ document.addEventListener('click', event => {
   if (!button || button.disabled || !project || !shot) return;
   event.preventDefault();
   event.stopImmediatePropagation();
+  try {
+    await flushDramaEditorAutosave();
+  } catch {
+    resetButton(button);
+    showPrerequisiteDialog(['自动保存失败，请稍后重试后再生成视频。']);
+    return;
+  }
   const issues = prerequisiteIssues(project, shot);
   if (issues.length) {
     resetButton(button);

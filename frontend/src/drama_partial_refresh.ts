@@ -3,6 +3,10 @@ import { syncDramaCoverUi } from './drama_cover_ui.js';
 import { syncDramaDecompositionBanner } from './drama_decomposition_banner_ui.js';
 import { activeDramaProject, dramaViewState, setActiveDramaProject } from './drama_state.js';
 import { dramaAssetImageIsGenerating } from './drama_asset_image_state_ui.js';
+import { dramaReferenceAsset } from './drama_reference_asset.js';
+import { dramaShotVideoStatus } from './drama_video_history.js';
+import { hasUnsavedDramaEditorChanges } from './drama_editor_autosave.js';
+import { refreshDramaVideoBatchGeneration } from './drama_video_batch_generation_ui.js';
 import type { ApiProject, GenerationTask } from './models.js';
 
 type PartialRefreshRuntime = {
@@ -18,6 +22,7 @@ export function configureDramaPartialRefresh(value: PartialRefreshRuntime) {
 
 function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
   const merged = new Map((project.tasks || []).map(task => [task.id, task]));
+  const changedTypes = new Set(tasks.filter(task => JSON.stringify(merged.get(task.id)) !== JSON.stringify({ ...merged.get(task.id), ...task })).map(task => task.type));
   tasks.forEach(task => merged.set(task.id, { ...merged.get(task.id), ...task }));
   project.tasks = [...merged.values()];
   tasks.forEach(task => {
@@ -29,13 +34,13 @@ function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
       const variant = project.assets?.flatMap(asset => asset.variants || []).find(item => item.id === task.resource_id);
       if (variant) variant.status = task.status;
     }
-    if (task.type === 'shot_prompt' || task.type === 'shot_video') {
+    if (task.type === 'shot_video') {
       const shot = project.shots?.find(item => item.id === task.resource_id);
       if (shot) shot.status = task.status;
     }
   });
   setActiveDramaProject(project);
-  core.applyDramaGenerationLoading(project);
+  core.applyDramaGenerationLoading(project, changedTypes);
   syncDramaPromptReferenceImages(project);
   syncDramaCoverUi(project);
   syncDramaDecompositionBanner(project);
@@ -45,8 +50,7 @@ function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
 function syncDramaPromptReferenceImages(project: ApiProject) {
   const editor = document.querySelector<HTMLElement>('.drama-rich-prompt-editor');
   if (!editor) return;
-  const assets = new Map((project.assets || []).map(asset => [asset.id, asset]));
-  const changed = [...editor.querySelectorAll<HTMLElement>('[data-drama-prompt-reference]')].some(chip => Boolean(chip.querySelector('.drama-image-loading')) !== dramaAssetImageIsGenerating(assets.get(chip.dataset.assetId || ''), project.tasks));
+  const changed = [...editor.querySelectorAll<HTMLElement>('[data-drama-prompt-reference]')].some(chip => Boolean(chip.querySelector('.drama-image-loading')) !== dramaAssetImageIsGenerating(dramaReferenceAsset(project.assets || [], { asset_id: chip.dataset.assetId || '', variant_id: chip.dataset.variantId || null }), project.tasks));
   if (changed) core.renderDramaPromptNodes(editor, project, core.readDramaPromptNodes(editor));
 }
 
@@ -55,12 +59,14 @@ function refreshShotList(project: ApiProject) {
     const nav = document.querySelector<HTMLElement>(`[data-drama-shot="${CSS.escape(shot.id)}"]`);
     const status = nav?.querySelector<HTMLElement>('.status');
     if (!status) return;
-    status.className = `status ${core.dramaStatusClass(shot.status)}`;
-    status.textContent = core.dramaStatusText(shot.status);
+    const shotStatus = dramaShotVideoStatus(shot, core.dramaShotVideoTask(project, shot.id));
+    status.className = `status ${core.dramaStatusClass(shotStatus)}`;
+    status.textContent = core.dramaStatusText(shotStatus);
   });
 }
 
 function resetRichPromptEditor(project: ApiProject) {
+  if (hasUnsavedDramaEditorChanges()) return;
   const panel = document.querySelector<HTMLElement>('.drama-prompt-panel');
   const textarea = panel?.querySelector<HTMLTextAreaElement>('#drama-shot-prompt');
   const shot = core.dramaSelectedShot(project);
@@ -122,6 +128,7 @@ async function refreshAssets(project: ApiProject) {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   project.assets = await response.json() as ApiProject['assets'];
   setActiveDramaProject(project);
+  window.dispatchEvent(new CustomEvent('drama-assets-refreshed', { detail: project.id }));
   syncDramaCoverUi(project);
   core.syncDramaShotReferencePanel(project);
   const backdrop = document.querySelector<HTMLElement>('.drama-sheet-backdrop');
@@ -148,7 +155,7 @@ export async function applyDramaTaskUpdate(tasks: GenerationTask[], completed: G
   const project = activeDramaProject;
   if (!runtime || !project || (!tasks.length && !completed.length)) return;
   mergeTasks(project, [...tasks, ...completed]);
-  if (completed.some(task => task.type === 'script_decomposition')) {
+  if (completed.some(task => ['script_decomposition', 'script_expansion'].includes(task.type))) {
     await runtime.loadFullDetail(project.id);
     return;
   }
@@ -157,8 +164,12 @@ export async function applyDramaTaskUpdate(tasks: GenerationTask[], completed: G
   if (assetChanged) await refreshAssets(project);
   if (shotChanged) await refreshShots(project);
   const shot = core.dramaSelectedShot(project);
-  if (!shot) return;
+  if (!shot) {
+    refreshDramaVideoBatchGeneration(project);
+    return;
+  }
   if (completed.some(task => task.type === 'shot_video' && task.resource_id === shot.id)) refreshVideoPanel(project);
   core.enhanceDramaShotEditor(project, shot);
+  refreshDramaVideoBatchGeneration(project);
   if (completed.some(task => task.type === 'shot_prompt' && task.resource_id === shot.id)) resetRichPromptEditor(project);
 }

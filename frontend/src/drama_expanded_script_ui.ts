@@ -1,15 +1,17 @@
 /** Modal for viewing the stored long-form screenplay without loading it into the editor. */
 
+import { confirmAction } from './confirmation_modal.js';
+
 type ExpandedScriptDialogOptions = {
   apiBaseUrl: string;
   projectId: string;
   toast: (message: string) => void;
+  onScreenplayTaskQueued?: () => void | Promise<void>;
 };
 
 type ExpandedScriptResponse = {
   script?: string;
   expanded_script?: string;
-  expanded_script_preview?: string;
   expanded_script_generating?: boolean;
   expanded_script_cancellable?: boolean;
   expanded_script_cancel_label?: string;
@@ -28,6 +30,7 @@ function scriptMeta(payload: ExpandedScriptResponse, original: string, expanded:
   const originalLength = payload.original_script_length ?? original.length;
   const expandedLength = payload.expanded_script_length ?? expanded.length;
   const errorMessage = payload.expanded_script_error_message?.trim();
+  const stage = payload.expanded_script_stage?.trim();
   const expandedMeta = errorMessage
     ? `扩写失败，任务已停止：${errorMessage}`
     : payload.expanded_script_task_status === '生成失败'
@@ -35,7 +38,7 @@ function scriptMeta(payload: ExpandedScriptResponse, original: string, expanded:
     : payload.expanded_script_task_status === '已取消'
     ? `扩写已取消，已保留 ${expandedLength.toLocaleString()} 字。`
     : payload.expanded_script_generating
-    ? `扩写后剧本正在生成中，已输出 ${expandedLength.toLocaleString()} 字。`
+    ? `扩写后剧本正在生成中，已保存 ${expandedLength.toLocaleString()} 字${stage ? `：${stage}` : '。'}`
     : `扩写后剧本 ${expandedLength.toLocaleString()} 字。`;
   return `原始剧本 ${originalLength.toLocaleString()} 字；${expandedMeta}`;
 }
@@ -44,23 +47,30 @@ function scriptMeta(payload: ExpandedScriptResponse, original: string, expanded:
 export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOptions) {
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop';
-  modal.innerHTML = `<div class="modal drama-expanded-script-modal" role="dialog" aria-modal="true" aria-labelledby="expanded-script-title"><button class="close" aria-label="关闭">×</button><div class="modal-head"><h2 id="expanded-script-title">剧本</h2><p data-expanded-script-meta>正在加载剧本…</p></div><div class="drama-expanded-script-fields"><label><span>原始剧本</span><textarea data-original-script rows="9" disabled></textarea></label><label><span>扩写后剧本</span><textarea data-expanded-script rows="16" disabled></textarea></label></div><div class="video-prompt-actions drama-expanded-script-actions"><div class="drama-expanded-script-action-group"><button class="ghost" data-expanded-script-continue hidden title="基于当前扩写剧本继续调用模型">继续扩写</button><button class="ghost" data-expanded-script-cancel hidden>取消扩写</button></div><div class="drama-expanded-script-action-group"><button class="ghost" data-expanded-script-close>关闭</button><button class="primary" data-expanded-script-save disabled>保存修改并分镜</button></div></div></div>`;
+  modal.innerHTML = `<div class="modal drama-expanded-script-modal" role="dialog" aria-modal="true" aria-labelledby="expanded-script-title"><button class="close" aria-label="关闭">×</button><div class="modal-head"><h2 id="expanded-script-title">剧本</h2><p data-expanded-script-meta>正在加载剧本…</p></div><div class="drama-expanded-script-fields"><label><span>原始剧本</span><textarea data-original-script rows="9" disabled></textarea></label><label><span>扩写后剧本</span><textarea data-expanded-script rows="16" disabled></textarea></label></div><div class="video-prompt-actions drama-expanded-script-actions"><div class="drama-expanded-script-action-group"><button class="ghost" data-expanded-script-continue hidden title="基于已生成内容继续扩写；尚无内容时从头开始扩写">继续扩写</button><button class="ghost danger-button" data-expanded-script-regenerate title="清空当前扩写、分镜与素材，从原始剧本重新生成">重新生成</button><button class="ghost" data-expanded-script-cancel hidden>取消扩写</button></div><div class="drama-expanded-script-action-group"><button class="ghost" data-expanded-script-close>关闭</button><button class="primary" data-expanded-script-save disabled>保存修改并分镜</button></div></div></div>`;
   document.body.append(modal);
   let refreshTimer: number | undefined;
   let loading = false;
   let loadSequence = 0;
   let cancelling = false;
+  let regenerating = false;
+  let refreshFromPage: ((event: Event) => void) | undefined;
   const stopRefreshing = () => {
     if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
     refreshTimer = undefined;
   };
-  const close = () => { stopRefreshing(); modal.remove(); };
+  const close = () => {
+    stopRefreshing();
+    if (refreshFromPage) window.removeEventListener('drama-screenplay-task-queued', refreshFromPage);
+    modal.remove();
+  };
   modal.querySelectorAll<HTMLElement>('.close,[data-expanded-script-close]').forEach(button => button.addEventListener('click', close));
   const originalInput = modal.querySelector<HTMLTextAreaElement>('[data-original-script]')!;
   const expandedInput = modal.querySelector<HTMLTextAreaElement>('[data-expanded-script]')!;
   const meta = modal.querySelector<HTMLElement>('[data-expanded-script-meta]')!;
   const cancelButton = modal.querySelector<HTMLButtonElement>('[data-expanded-script-cancel]')!;
   const continueButton = modal.querySelector<HTMLButtonElement>('[data-expanded-script-continue]')!;
+  const regenerateButton = modal.querySelector<HTMLButtonElement>('[data-expanded-script-regenerate]')!;
   const saveButton = modal.querySelector<HTMLButtonElement>('[data-expanded-script-save]')!;
 
   const loadScreenplay = async (force = false) => {
@@ -76,19 +86,16 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
       const expandedGenerating = payload.expanded_script_generating === true;
       const expansionCancellable = expandedGenerating && payload.expanded_script_cancellable !== false;
       const expandedFailed = payload.expanded_script_task_status === '生成失败';
-      // Keep already-rendered stream text visible if a failed-task response
-      // arrives without a persisted checkpoint. The API normally supplies the
-      // latest failed-task preview, while this protects the transition itself.
-      const streamedScript = payload.expanded_script_preview || payload.expanded_script || expandedInput.value;
+      const storedScript = payload.expanded_script || '';
       const followsLatest = expandedInput.scrollTop + expandedInput.clientHeight >= expandedInput.scrollHeight - 24;
       originalInput.value = payload.script || '';
-      if (expandedInput.value !== streamedScript) {
-        expandedInput.value = streamedScript;
+      if (expandedInput.value !== storedScript) {
+        expandedInput.value = storedScript;
         if (followsLatest) expandedInput.scrollTop = expandedInput.scrollHeight;
       }
-      expandedInput.placeholder = expandedGenerating ? '正在生成中，内容会实时显示在这里…' : '';
+      expandedInput.placeholder = expandedGenerating ? '正在生成中；每个批次保存后会在这里更新完整剧本…' : '';
       expandedInput.setAttribute('aria-busy', String(expandedGenerating));
-      meta.textContent = scriptMeta(payload, originalInput.value, streamedScript);
+      meta.textContent = scriptMeta(payload, originalInput.value, storedScript);
       if (expandedFailed && payload.expanded_script_stage && !payload.expanded_script_error_message) {
         meta.textContent += `（${payload.expanded_script_stage}）`;
       }
@@ -98,9 +105,13 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
       cancelButton.hidden = !expansionCancellable;
       cancelButton.disabled = !expansionCancellable || cancelling;
       if (!cancelling) cancelButton.textContent = payload.expanded_script_cancel_label || '取消扩写';
-      const hasExpandableScript = streamedScript.trim().length > 0;
+      const hasExpandableScript = storedScript.trim().length > 0;
+      const canStartFromOriginal = originalInput.value.trim().length >= 10;
       continueButton.hidden = false;
-      continueButton.disabled = expandedGenerating || !hasExpandableScript;
+      continueButton.disabled = expandedGenerating || (!hasExpandableScript && !canStartFromOriginal);
+      continueButton.textContent = expandedGenerating ? '扩写中…' : hasExpandableScript ? '继续扩写' : '从头扩写';
+      regenerateButton.disabled = expandedGenerating || regenerating || !canStartFromOriginal;
+      if (!regenerating) regenerateButton.textContent = '重新生成';
       if (expandedGenerating && refreshTimer === undefined) refreshTimer = window.setInterval(() => void loadScreenplay(), 1_000);
       if (!expandedGenerating) stopRefreshing();
     } catch (error) {
@@ -112,6 +123,10 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
       if (sequence === loadSequence) loading = false;
     }
   };
+  refreshFromPage = event => {
+    if (event instanceof CustomEvent && event.detail === options.projectId) void loadScreenplay(true);
+  };
+  window.addEventListener('drama-screenplay-task-queued', refreshFromPage);
   void loadScreenplay();
 
   cancelButton.addEventListener('click', async () => {
@@ -167,14 +182,57 @@ export function openDramaExpandedScriptModal(options: ExpandedScriptDialogOption
         throw new Error(detail.detail || `HTTP ${response.status}`);
       }
       queued = true;
-      options.toast('已基于当前剧本开始继续扩写');
+      options.toast(expandedInput.value.trim() ? '已基于当前剧本开始继续扩写' : '已从原始剧本开始扩写');
+      await options.onScreenplayTaskQueued?.();
       await loadScreenplay();
     } catch (error) {
       options.toast(error instanceof Error ? error.message : '继续扩写失败');
       console.error(error);
     } finally {
-      continueButton.textContent = '继续扩写';
       if (!queued) continueButton.disabled = false;
+    }
+  });
+
+  regenerateButton.addEventListener('click', async () => {
+    if (regenerating) return;
+    const script = originalInput.value.trim();
+    if (script.length < 10) {
+      options.toast('原始剧本不少于 10 个字');
+      originalInput.focus();
+      return;
+    }
+    const confirmed = await confirmAction({
+      title: '从头重新生成整个工程？',
+      description: '将清空当前扩写剧本、分镜、素材和视频历史，并取消正在进行的生成任务；随后按此处原始剧本重新开始。',
+      confirmLabel: '重新生成',
+    });
+    if (!confirmed) return;
+    regenerating = true;
+    loadSequence += 1;
+    stopRefreshing();
+    regenerateButton.disabled = true;
+    regenerateButton.textContent = '重新生成中…';
+    continueButton.disabled = true;
+    cancelButton.hidden = true;
+    saveButton.disabled = true;
+    try {
+      const response = await fetch(`${options.apiBaseUrl}/projects/${encodeURIComponent(options.projectId)}/script-decomposition/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `HTTP ${response.status}`);
+      }
+      await options.onScreenplayTaskQueued?.();
+      options.toast('已从原始剧本重新生成，正在展示生成进度');
+      close();
+    } catch (error) {
+      regenerating = false;
+      options.toast(error instanceof Error ? error.message : '重新生成失败');
+      console.error(error);
+      await loadScreenplay(true);
     }
   });
 

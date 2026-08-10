@@ -1,6 +1,0 @@
-{
-  "scope": "drama",
-  "name": "shot_prompt",
-  "version": "v1",
-  "template": "根据已保存的素材目录和分镜原文，生成可编辑的富文本分镜提示词。严格输出 JSON：{\"nodes\":[{\"type\":\"text\",\"text\":\"文本\"},{\"type\":\"reference\",\"asset_id\":\"素材ID\",\"asset_type\":\"character|scene|prop|placeholder\",\"label\":\"素材名称\"}]}。文本顺序必须是：场景、角色、风格、光线、位置、2到3个连续镜头、每个镜头对应的配音。引用图片的位置必须使用 reference 节点，不能写图片 URL，不能虚构素材。每个镜头以【镜头N | 时长Xs | 时间：日 外】开头，并包含机位、动作、光线、连续性和配音信息。若 subtitles 为 false，省略所有字幕段落、字幕说明和字幕标记，但保留配音信息。若 background_music 为 false，省略所有背景音乐、配乐和 BGM 段落，但保留配音、音效和环境音。"
-}
