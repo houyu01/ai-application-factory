@@ -1,19 +1,14 @@
-# AI Application Factory
-<img width="3022" height="1468" alt="image" src="https://github.com/user-attachments/assets/d2c989d2-c4d8-49ac-956a-47ca2866fee6" />
+# 客户端控制的短剧游戏平台
+兼容国内外各大云厂商的模型，可以混用(seedream的图片生成、wanxiang的视频生成)
+<img width="3014" height="1700" alt="image" src="https://github.com/user-attachments/assets/23ac1272-96f7-4972-9c93-90a7e9c5aefe" />
 
+## 轻松制作短剧
+超短脚本扩写，并自动分镜
 
-一个短剧和互动影视游戏创作的平台，一个兼容了阿里云、腾讯云、火山引擎多个引擎混用的创作平台底座，支持web/桌面端/ipad版
+```
+一个小说，主要是关于男主角从一个山村小伙子，成长为一代仙门大侠的故事，小时候男主角被灭满门，被青云山的道人收养，男主角在仙门内一路修炼成长，在门内小有所成之后，与其他仙门共同剿灭魔道，结识了魔道女少主，并与魔道女少主相爱，为正道所不容，但是最后通过与正道摩擦，发现了隐藏在正道内部的一个秘密，原来大boss就是正道魁首，男主与正道魁首多番较量，最终揭露他的真面目，最后男主带着魔道少主一起归隐山林
+```
+<img width="2078" height="1626" alt="image" src="https://github.com/user-attachments/assets/e118d3ff-1bc5-484a-81d2-8378d99f47c0" />
 
-## 当前迭代版本
-
-本项目当前以 **Tauri 桌面端** 为唯一持续迭代的产品实现：
-`frontend/` 负责 TypeScript 界面，`src-tauri/` 负责 Rust 本地服务、数据存储、任务与模型提供商调用。
-
-后续的功能开发、界面调整、问题修复和 AI 生成代码均在这套 Tauri 实现中完成。应用由 Rust 管理本地 SQLite、媒体和生成任务；迁移完成范围见 [Rust 迁移审计清单](docs/rust-migration-audit.md)。
-
-<img width="2896" height="1452" alt="image" src="https://github.com/user-attachments/assets/ff38ffe8-cfe1-49fd-915f-c7787c12788d" />
-
-一句话生成并扩写10w字以上的剧本，剧本分镜全自动
-
-<img width="2894" height="1446" alt="image" src="https://github.com/user-attachments/assets/6b583650-6d26-4265-82c9-8add4ace7082" />
-素材自动生成
+自动拆分短剧需要的素材
+<img width="1512" height="1668" alt="image" src="https://github.com/user-attachments/assets/ecdda242-8d7a-4a5c-9469-1c7798e8db27" />
