@@ -12,3 +12,9 @@
 
 自动拆分短剧需要的素材
 <img width="1512" height="1668" alt="image" src="https://github.com/user-attachments/assets/ecdda242-8d7a-4a5c-9469-1c7798e8db27" />
+
+自动形成分镜与故事结构
+<img width="2494" height="1666" alt="image" src="https://github.com/user-attachments/assets/72d73022-c179-4ade-b2ae-799733d14678" />
+
+支持多种云厂商配置、混用
+<img width="2512" height="982" alt="image" src="https://github.com/user-attachments/assets/3249ad06-a14e-423e-a7e2-8fa5590b2ab9" />
