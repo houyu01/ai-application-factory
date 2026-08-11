@@ -3,6 +3,7 @@
 import { syncGameSelectedNode } from './game_materials_ui.js';
 import { syncGameCoverUi } from './game_cover_ui.js';
 import { syncGamePlaceholderUi } from './game_placeholder_ui.js';
+import { syncGameGenerationBanner } from './game_generation_banner_ui.js';
 import type { Game, GameTask, VoicePreset } from './models.js';
 import { gameNodeTaskIsGenerating } from './game_graph_canvas.js';
 import { gameGraphSignature, mergeGameTaskSnapshot } from './game_task_refresh_state.js';
@@ -24,6 +25,7 @@ type Options = {
   runtime: Runtime;
   findTask: TaskFinder;
   refresh: () => Promise<void>;
+  onRetryGeneration?: (gameId: string) => void;
 };
 
 function syncStatus(element: HTMLElement | null, status: string) {
@@ -64,6 +66,7 @@ function syncGraphTaskState(game: Game) {
 export function syncGameTaskPollingUi(options: Options) {
   const graphChanged = gameGraphSignature(options.current) !== gameGraphSignature(options.latest);
   mergeGameTaskSnapshot(options.current, options.latest);
+  syncGameGenerationBanner(options.current, options.runtime.escapeHtml, options.onRetryGeneration);
   if (graphChanged) return true;
   syncGraphTaskState(options.current);
   syncGameSelectedNode(options.current, options.runtime, options.findTask, options.refresh);

@@ -1,0 +1,27 @@
+/* Keep the iPad workspace below the system status bar in fullscreen WebViews. */
+@supports (padding-top: env(safe-area-inset-top)) {
+  @media (min-width: 768px) and (hover: none) and (pointer: coarse) {
+    :root {
+      --tablet-safe-top: max(24px, env(safe-area-inset-top, 0px));
+      --tablet-safe-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    }
+
+    .shell {
+      height: calc(100vh - var(--tablet-safe-top) - var(--tablet-safe-bottom));
+      margin-top: var(--tablet-safe-top);
+    }
+
+    .shell > aside,
+    .shell > main {
+      height: 100%;
+    }
+
+    .modal-backdrop {
+      inset: var(--tablet-safe-top) 0 var(--tablet-safe-bottom);
+    }
+
+    .toast {
+      bottom: calc(28px + var(--tablet-safe-bottom));
+    }
+  }
+}

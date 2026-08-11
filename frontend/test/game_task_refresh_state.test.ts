@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { GAME_TASK_REFRESH_INTERVAL_MS, gameGraphSignature, gameHasRunningTasks, mergeGameTaskSnapshot } from '../src/game_task_refresh_state.ts';
+import { GAME_STREAM_REFRESH_INTERVAL_MS, GAME_TASK_REFRESH_INTERVAL_MS, gameGraphSignature, gameHasRunningTasks, gameTaskRefreshInterval, mergeGameTaskSnapshot } from '../src/game_task_refresh_state.ts';
 import type { Game } from '../src/models.ts';
 
 function game(overrides: Partial<Game> = {}): Game {
@@ -19,6 +19,11 @@ test('only generating tasks keep the background game task refresh active', () =>
   assert.equal(gameHasRunningTasks(game()), false);
   assert.equal(gameHasRunningTasks(game({ tasks: [{ id: 'task-1', type: 'node_video_generation', status: '生成中', game_id: 'game-1' }] })), true);
   assert.equal(GAME_TASK_REFRESH_INTERVAL_MS, 3_000);
+});
+
+test('screenplay streams refresh faster than regular game tasks', () => {
+  assert.equal(gameTaskRefreshInterval(game({ tasks: [{ id: 'task-1', type: 'game_script_expansion', status: '生成中', game_id: 'game-1' }] })), GAME_STREAM_REFRESH_INTERVAL_MS);
+  assert.equal(gameTaskRefreshInterval(game({ tasks: [{ id: 'task-1', type: 'node_video_generation', status: '生成中', game_id: 'game-1' }] })), GAME_TASK_REFRESH_INTERVAL_MS);
 });
 
 test('task refresh keeps current node identity while updating its durable state', () => {
