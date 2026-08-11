@@ -80,6 +80,11 @@ export function apiKeyVisibilityIcon(revealed: boolean) {
   return `<svg class="model-api-key-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.1 12s3.2-5 9.9-5 9.9 5 9.9 5-3.2 5-9.9 5-9.9-5-9.9-5Z" /><circle cx="12" cy="12" r="2.2" />${slash}</svg>`;
 }
 
+/** Whether the settings form already has a key that can be revealed without reading saved configuration. */
+export function hasEnteredApiKey(value: string) {
+  return value.trim().length > 0;
+}
+
 export function renderModelEditor(card: HTMLElement, kind: ModelKind, values: string[], selected?: string) {
   const models = values.filter((value, index) => value && values.indexOf(value) === index);
   const trigger = card.querySelector<HTMLElement>('[data-model-trigger]');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { configureSettingsRuntime, configuredModelSelection, isCurrentModelSettingsResponse, modelSettingsCard, restoreSettingsScroll, voiceCatalogMarkup, voicePreviewCanEdit, voicePreviewStyle } from '../src/settings_ui.ts';
+import { configureSettingsRuntime, configuredModelSelection, hasEnteredApiKey, isCurrentModelSettingsResponse, modelSettingsCard, restoreSettingsScroll, voiceCatalogMarkup, voicePreviewCanEdit, voicePreviewStyle } from '../src/settings_ui.ts';
 import type { ModelKind, ModelSettings, VoicePreset } from '../src/models.ts';
 import { providerModelProfile } from '../src/model_provider_profiles.ts';
 
@@ -95,6 +95,11 @@ test('non-settings rerenders leave the new main pane at its default position', (
 test('an older model-settings response cannot replace a newer model list', () => {
   assert.equal(isCurrentModelSettingsResponse(3, 4), false);
   assert.equal(isCurrentModelSettingsResponse(4, 4), true);
+});
+
+test('a newly entered API key can be revealed before it is saved', () => {
+  assert.equal(hasEnteredApiKey('  sk-entered-locally  '), true);
+  assert.equal(hasEnteredApiKey('   '), false);
 });
 
 test('voice catalog includes a form for creator-defined names and descriptions', () => {

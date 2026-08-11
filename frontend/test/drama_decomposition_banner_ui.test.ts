@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { generationCopy, modelWaitNoticeMarkup } from '../src/drama_decomposition_banner_ui.ts';
+import { generationCopy, modelWaitNoticeMarkup, modelWaitNoticeTitleSuffix } from '../src/drama_decomposition_banner_ui.ts';
 import type { ApiProject, GenerationTask } from '../src/models.ts';
 
 const project: ApiProject = {
@@ -44,5 +44,12 @@ test('generation progress shows a persistent model-wait notice', () => {
   assert.equal(
     modelWaitNoticeMarkup(),
     '<p class="drama-decomposition-wait-notice">调用大模型过程等待时间可能较长，请耐心等待</p>',
+  );
+});
+
+test('model-wait guidance uses Chinese parentheses in a generation title', () => {
+  assert.equal(
+    `第 3/4 步：拆分视频节点${modelWaitNoticeTitleSuffix()}`,
+    '第 3/4 步：拆分视频节点（调用大模型过程等待时间可能较长，请耐心等待）',
   );
 });

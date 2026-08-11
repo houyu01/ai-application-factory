@@ -16,7 +16,7 @@ import { confirmAction } from './confirmation_modal.js';
 import { icon } from './ui_icons.js';
 import { notifyModelTaskFailures, suppressExistingModelTaskFailureNotifications } from './model_task_failure_toast.js';
 import { bindGamePlayer, gamePlayerMarkup, type GamePlayerSession } from './game_player_ui.js';
-import { modelWaitNoticeMarkup } from './drama_decomposition_banner_ui.js';
+import { modelWaitNoticeTitleSuffix } from './drama_decomposition_banner_ui.js';
 
 type GameRuntime = {
   apiBaseUrl: string;
@@ -121,6 +121,13 @@ export function openGameModal() {
 }
 
 const GAME_GENERATION_STEPS = ['等待执行', '扩写剧本', '拆分视频节点', '保存图谱'];
+
+/** Build the active game-generation title shown at the top of its progress banner. */
+function gameGenerationTitle(currentStep: number, graphPlanning: boolean) {
+  if (!graphPlanning) return '第 2/4 步：扩写互动游戏剧本（上方“剧本”可查看完整内容）';
+  return `第 ${currentStep + 1}/4 步：${GAME_GENERATION_STEPS[currentStep]}${modelWaitNoticeTitleSuffix()}`;
+}
+
 function gameGenerationBanner(game: Game) {
   const tasks = [...(game.tasks || [])].reverse();
   const task = tasks.find(item => item.status === '生成中' && ['game_script_expansion', 'game_graph_decomposition'].includes(item.type)) || tasks.find(item => item.status === '生成失败' && ['game_script_expansion', 'game_graph_decomposition'].includes(item.type));
@@ -135,11 +142,11 @@ function gameGenerationBanner(game: Game) {
   const nodeCount = Number(snapshot.preview_node_count || 0);
   const edgeCount = Number(snapshot.preview_edge_count || 0);
   const steps = GAME_GENERATION_STEPS.map((label, index) => `<li class="${index < currentStep ? 'completed' : index === currentStep ? 'active' : ''}"${index === currentStep ? ' aria-current="step"' : ''}><i>${index + 1}</i><span>${label}</span></li>`).join('');
-  const title = failed ? graphPlanning ? '游戏图谱生成失败' : '互动游戏剧本扩写失败' : graphPlanning ? `第 ${currentStep + 1}/4 步：${GAME_GENERATION_STEPS[currentStep]}` : '第 2/4 步：扩写互动游戏剧本（上方“剧本”可查看完整内容）';
+  const title = failed ? graphPlanning ? '游戏图谱生成失败' : '互动游戏剧本扩写失败' : gameGenerationTitle(currentStep, graphPlanning);
   const skeleton = graphPlanning ? `<div class="game-meta"><span>视频节点骨架：${nodeCount} 个</span><span>选择边：${edgeCount} 条</span></div>` : '';
   const received = graphPlanning ? `<span>骨架已接收 ${receivedChars.toLocaleString()} 字</span>` : '';
   const detail = failed ? task.error_message || `${graphPlanning ? '游戏图谱生成' : '互动游戏剧本扩写'}失败，请检查模型配置后重试。` : task.stage || '正在准备生成任务。';
-  const meter = failed ? '' : `<div class="drama-decomposition-progress"><ol>${steps}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="${progress}"></progress><div class="drama-decomposition-progress-details">${received}<span data-drama-decomposition-progress-label>当前进度 ${progress}%</span></div></div>${modelWaitNoticeMarkup()}</div>`;
+  const meter = failed ? '' : `<div class="drama-decomposition-progress"><ol>${steps}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="${progress}"></progress><div class="drama-decomposition-progress-details">${received}<span data-drama-decomposition-progress-label>当前进度 ${progress}%</span></div></div></div>`;
   return `<section class="drama-decomposition-banner${failed ? ' failed' : ''}" role="${failed ? 'alert' : 'status'}"><span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title">${rt().escapeHtml(title)}</span><p class="drama-decomposition-banner-detail">${rt().escapeHtml(detail)}</p>${meter}${skeleton}<pre class="drama-decomposition-banner-preview"${preview ? '' : ' hidden'} aria-live="polite">${rt().escapeHtml(preview)}</pre>${failed ? '<button type="button" class="ghost compact" id="game-retry-generation">重试</button>' : ''}</div></section>`;
 }
 

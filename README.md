@@ -7,14 +7,11 @@
 
 ```
 一个小说，主要是关于男主角从一个山村小伙子，成长为一代仙门大侠的故事，小时候男主角被灭满门，被青云山的道人收养，男主角在仙门内一路修炼成长，在门内小有所成之后，与其他仙门共同剿灭魔道，结识了魔道女少主，并与魔道女少主相爱，为正道所不容，但是最后通过与正道摩擦，发现了隐藏在正道内部的一个秘密，原来大boss就是正道魁首，男主与正道魁首多番较量，最终揭露他的真面目，最后男主带着魔道少主一起归隐山林
-```
-<img width="2078" height="1626" alt="image" src="https://github.com/user-attachments/assets/e118d3ff-1bc5-484a-81d2-8378d99f47c0" />
 
 自动拆分短剧需要的素材
 <img width="1512" height="1668" alt="image" src="https://github.com/user-attachments/assets/ecdda242-8d7a-4a5c-9469-1c7798e8db27" />
 
-自动形成分镜与故事结构
-<img width="2494" height="1666" alt="image" src="https://github.com/user-attachments/assets/72d73022-c179-4ade-b2ae-799733d14678" />
+一句话生成并扩写10w字以上的剧本，剧本分镜全自动
 
-支持多种云厂商配置、混用
-<img width="2512" height="982" alt="image" src="https://github.com/user-attachments/assets/3249ad06-a14e-423e-a7e2-8fa5590b2ab9" />
+<img width="2894" height="1446" alt="image" src="https://github.com/user-attachments/assets/6b583650-6d26-4265-82c9-8add4ace7082" />
+素材自动生成

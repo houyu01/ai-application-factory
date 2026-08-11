@@ -18,6 +18,11 @@ export function modelWaitNoticeMarkup() {
   return `<p class="drama-decomposition-wait-notice">${MODEL_WAIT_NOTICE}</p>`;
 }
 
+/** Format the shared wait guidance when it is part of a generation-banner title. */
+export function modelWaitNoticeTitleSuffix() {
+  return `（${MODEL_WAIT_NOTICE}）`;
+}
+
 function screenplayTask(project: ApiProject | null) {
   const tasks = [...(project?.tasks || [])].reverse();
   const active = tasks.find(task => task.status === '生成中'

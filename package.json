@@ -10,7 +10,8 @@
     "dev:desktop": "tauri dev",
     "build:mac": "tauri build --bundles app,dmg && node scripts/promote-dmg.mjs",
     "build:windows": "node scripts/build-windows.mjs && node scripts/promote-windows.mjs",
-    "build:ipad": "node scripts/build-ipad.mjs",
+    "init:ipad": "node scripts/init-ipad.mjs",
+    "build:ipad": "node scripts/build-ipad.mjs && node scripts/promote-ipad.mjs",
     "typecheck": "npm run typecheck --workspace frontend",
     "test": "npm test --workspace frontend"
   },

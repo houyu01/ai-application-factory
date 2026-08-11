@@ -20,7 +20,7 @@ import { dramaProjectListPage, projectFromApi } from './drama_project_list_ui.js
 import type { StorageSettingsResponse } from './drama_modal_ui.js';
 import type { ApiGame, ApiProject, DramaAssetImageHistory, DramaAssetKind, DramaAssetMetadata, DramaAssetVariant, DramaEpisode, DramaPlacement, DramaPromptAssetType, DramaShot, DramaShotVersion, Game, GameAsset, GameEdge, GameNode, GameTask, GenerationTask, Locale, ModelKind, ModelSettings, Project, VoicePreset } from './models.js';
 import { restoredProviderModelProfile } from './model_provider_profiles.js';
-import { apiKeyVisibilityIcon, applyModelSelect, configureSettingsRuntime, loadModelSettings, loadVoicePresets, modelChoices, modelEditorValues, modelSettingsCard, refreshModelSelects, renderModelEditor, saveModelOptions, voiceCatalogCard, voiceOptions, voicePreset } from './settings_ui.js';
+import { apiKeyVisibilityIcon, applyModelSelect, configureSettingsRuntime, hasEnteredApiKey, loadModelSettings, loadVoicePresets, modelChoices, modelEditorValues, modelSettingsCard, refreshModelSelects, renderModelEditor, saveModelOptions, voiceCatalogCard, voiceOptions, voicePreset } from './settings_ui.js';
 import { configureVoiceCatalogInteractions } from './voice_catalog_interactions.js';
 const { dramaAssets, dramaAssetDrawer, dramaKindLabel, dramaSelectedShot, dramaShots, openAssetPublicPromptModal, resolveMediaUrl, setGenerationButtonLoading, loadDramaDetail: loadDramaDetailCore, loadDramaProjects, deleteDramaProject } = dramaCore;
 const { bindDramaWorkspace, storageEndpointPlaceholder, storageField, storageProviderStatus } = dramaModal;
@@ -324,6 +324,13 @@ document.addEventListener('click', event => {
     button.innerHTML = apiKeyVisibilityIcon(false);
     button.title = '查看 API Key';
     button.setAttribute('aria-label', '查看 API Key');
+    return;
+  }
+  if (hasEnteredApiKey(input.value)) {
+    input.type = 'text';
+    button.innerHTML = apiKeyVisibilityIcon(true);
+    button.title = '隐藏 API Key';
+    button.setAttribute('aria-label', '隐藏 API Key');
     return;
   }
   button.disabled = true;
