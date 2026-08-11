@@ -14,6 +14,7 @@ use super::{game_asset_prompt::game_asset_generation_prompt, DurableWorker};
 
 const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
 const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+pub(super) const GAME_GRAPH_VALIDATION_ERROR: &str = "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。";
 
 fn join_game_screenplay(existing: &str, addition: &str) -> String {
     if existing.trim().is_empty() {
@@ -58,6 +59,9 @@ impl DurableWorker {
             ))),
         };
         if let Err(error) = result {
+            if self.retry_game_graph_validation_error(&task, id, &error) {
+                return;
+            }
             let terminal =
                 self.repository
                     .finish_game_task(id, FAILED, None, Some(&error.to_string()));
@@ -217,12 +221,8 @@ impl DurableWorker {
             78,
             "正在复核剧本与人物、场景、道具的对应关系",
         )?;
-        let plan = planner::model_game_plan(&response, &game).ok_or_else(|| {
-            AppError::External(
-                "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。"
-                    .to_owned(),
-            )
-        })?;
+        let plan = planner::model_game_plan(&response, &game)
+            .ok_or_else(|| AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned()))?;
         self.repository
             .persist_game_graph_checkpoint(task_id, game_id, &plan)?;
         self.save_game_graph_checkpoint(task_id, game_id, &plan)

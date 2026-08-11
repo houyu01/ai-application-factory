@@ -8,3 +8,7 @@ dist/
 !.env.example
 !.env.template
 !.env.ios.example
+!.env.android.example
+
+# Android release signing credentials generated from .env.android.
+src-tauri/gen/android/keystore.properties

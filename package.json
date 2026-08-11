@@ -12,6 +12,9 @@
     "build:windows": "node scripts/build-windows.mjs && node scripts/promote-windows.mjs",
     "init:ipad": "node scripts/init-ipad.mjs",
     "build:ipad": "node scripts/build-ipad.mjs && node scripts/promote-ipad.mjs",
+    "init:android": "node scripts/init-android.mjs",
+    "build:android": "node scripts/build-android.mjs && node scripts/promote-android.mjs",
+    "build:android:pad": "npm run build:android",
     "typecheck": "npm run typecheck --workspace frontend",
     "test": "npm test --workspace frontend"
   },

@@ -11,8 +11,42 @@ use super::DurableWorker;
 const IMMEDIATE_LANGUAGE_ATTEMPTS: i64 = 3;
 const DURABLE_LANGUAGE_ATTEMPTS: i64 = 4;
 const DURABLE_RETRY_DELAYS: [i64; 3] = [1, 2, 5];
+const GAME_GRAPH_VALIDATION_RETRIES: i64 = 4;
 
 impl DurableWorker {
+    /// Requeue graph decomposition when a complete model response is rejected by the graph contract.
+    ///
+    /// The game workbench keeps its strict DAG validation, but transiently malformed model output
+    /// receives four further fresh generations before the durable task becomes a visible failure.
+    pub(super) fn retry_game_graph_validation_error(
+        &self,
+        task: &Value,
+        id: &str,
+        error: &AppError,
+    ) -> bool {
+        let AppError::External(message) = error else {
+            return false;
+        };
+        let attempts = task["poll_attempts"].as_i64().unwrap_or(1);
+        if task["type"] != "game_graph_decomposition"
+            || message != super::game::GAME_GRAPH_VALIDATION_ERROR
+            || attempts > GAME_GRAPH_VALIDATION_RETRIES
+        {
+            return false;
+        }
+        let delay = durable_retry_delay(attempts);
+        self.repository
+            .reschedule_game_task(
+                id,
+                delay,
+                &format!(
+                    "模型图谱校验未通过，{delay} 秒后自动重试（第 {attempts}/{GAME_GRAPH_VALIDATION_RETRIES} 次）"
+                ),
+                Some(message),
+            )
+            .is_ok()
+    }
+
     /// Requeue only transient language-provider failures after fast in-call retries are exhausted.
     pub(super) fn retry_durable_provider_error(
         &self,
@@ -129,6 +163,7 @@ mod tests {
     };
 
     use super::{immediate_language_retry_delay, retryable_language_error, DurableWorker};
+    use crate::worker::game::GAME_GRAPH_VALIDATION_ERROR;
 
     #[test]
     fn retries_short_lived_transport_and_stream_failures() {
@@ -210,6 +245,76 @@ mod tests {
             .as_str()
             .is_some_and(|stage| stage.contains("1 秒后自动重试")));
         assert!(saved["next_poll_at"].as_str().is_some());
+        fs::remove_dir_all(root).expect("remove test database");
+    }
+
+    #[test]
+    fn retries_invalid_game_graph_output_without_marking_the_game_failed() {
+        let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+        let repository = Repository::new(
+            Database::open(root.join("ai_application_factory.db")).expect("test database"),
+        );
+        let game = repository
+            .create_game(Map::from_iter([
+                ("name".to_owned(), json!("自动重试图谱")),
+                (
+                    "script".to_owned(),
+                    json!("玩家在钟楼收到失踪搭档的录音，必须在警报响起前找出真相。"),
+                ),
+                ("success_ending_count".to_owned(), json!(1)),
+                ("failure_ending_count".to_owned(), json!(1)),
+            ]))
+            .expect("create game");
+        let game_id = game["id"].as_str().expect("game id");
+        repository
+            .complete_game_screenplay_expansion(
+                game["task"]["id"].as_str().expect("expansion task id"),
+                game_id,
+                "【剧情段 S01｜开始】\n【玩家抉择】\n【结局 E01｜成功】\n【结局 E02｜失败】",
+                20,
+                true,
+            )
+            .expect("queue graph task");
+        let claimed = repository
+            .claim_game_task_types(&["game_graph_decomposition"])
+            .expect("claim graph task")
+            .expect("graph task");
+        let task_id = claimed["id"].as_str().expect("graph task id");
+        let worker = DurableWorker::new(
+            repository.clone(),
+            MediaStore::new(repository.clone()).expect("media store"),
+        )
+        .expect("worker");
+
+        assert!(worker.retry_game_graph_validation_error(
+            &claimed,
+            task_id,
+            &AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned()),
+        ));
+
+        let saved = repository.get_game_task(task_id).expect("rescheduled task");
+        assert_eq!(saved["status"], GENERATING);
+        assert_eq!(saved["error_message"], GAME_GRAPH_VALIDATION_ERROR);
+        assert!(saved["stage"]
+            .as_str()
+            .is_some_and(|stage| stage.contains("图谱校验未通过")));
+        assert!(saved["next_poll_at"].as_str().is_some());
+        repository
+            .db
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE game_tasks SET poll_attempts=5 WHERE id=?1",
+                    [task_id],
+                )?;
+                Ok(())
+            })
+            .expect("exhaust retries");
+        let exhausted = repository.get_game_task(task_id).expect("exhausted task");
+        assert!(!worker.retry_game_graph_validation_error(
+            &exhausted,
+            task_id,
+            &AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned()),
+        ));
         fs::remove_dir_all(root).expect("remove test database");
     }
 }
