@@ -16,6 +16,7 @@ import { confirmAction } from './confirmation_modal.js';
 import { icon } from './ui_icons.js';
 import { notifyModelTaskFailures, suppressExistingModelTaskFailureNotifications } from './model_task_failure_toast.js';
 import { bindGamePlayer, gamePlayerMarkup, type GamePlayerSession } from './game_player_ui.js';
+import { modelWaitNoticeMarkup } from './drama_decomposition_banner_ui.js';
 
 type GameRuntime = {
   apiBaseUrl: string;
@@ -138,7 +139,7 @@ function gameGenerationBanner(game: Game) {
   const skeleton = graphPlanning ? `<div class="game-meta"><span>视频节点骨架：${nodeCount} 个</span><span>选择边：${edgeCount} 条</span></div>` : '';
   const received = graphPlanning ? `<span>骨架已接收 ${receivedChars.toLocaleString()} 字</span>` : '';
   const detail = failed ? task.error_message || `${graphPlanning ? '游戏图谱生成' : '互动游戏剧本扩写'}失败，请检查模型配置后重试。` : task.stage || '正在准备生成任务。';
-  const meter = failed ? '' : `<div class="drama-decomposition-progress"><ol>${steps}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="${progress}"></progress><div class="drama-decomposition-progress-details">${received}<span data-drama-decomposition-progress-label>当前进度 ${progress}%</span></div></div></div>`;
+  const meter = failed ? '' : `<div class="drama-decomposition-progress"><ol>${steps}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="${progress}"></progress><div class="drama-decomposition-progress-details">${received}<span data-drama-decomposition-progress-label>当前进度 ${progress}%</span></div></div>${modelWaitNoticeMarkup()}</div>`;
   return `<section class="drama-decomposition-banner${failed ? ' failed' : ''}" role="${failed ? 'alert' : 'status'}"><span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title">${rt().escapeHtml(title)}</span><p class="drama-decomposition-banner-detail">${rt().escapeHtml(detail)}</p>${meter}${skeleton}<pre class="drama-decomposition-banner-preview"${preview ? '' : ' hidden'} aria-live="polite">${rt().escapeHtml(preview)}</pre>${failed ? '<button type="button" class="ghost compact" id="game-retry-generation">重试</button>' : ''}</div></section>`;
 }
 

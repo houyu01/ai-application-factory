@@ -5,6 +5,7 @@
   "license": "MIT",
   "workspaces": ["frontend"],
   "scripts": {
+    "tauri": "tauri",
     "dev": "tauri dev",
     "dev:desktop": "tauri dev",
     "build:mac": "tauri build --bundles app,dmg && node scripts/promote-dmg.mjs",

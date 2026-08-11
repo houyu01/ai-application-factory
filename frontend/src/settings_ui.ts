@@ -28,7 +28,7 @@ function modelCompatibilityHint(kind: ModelKind, provider: NonNullable<ModelSett
   if (kind === 'multimodal' && provider === 'dashscope') return 'Qwen-Image 2.0 系列按 messages 输入；选择编辑模型时可附带 1–3 张参考图。';
   if (kind === 'video' && provider === 'dashscope') return `${model || 'Wan R2V'} 通过 reference_urls 接收参考素材；R2V 模型必须至少有一张参考图，Wan 2.6 中国区请填写工作空间 Endpoint。`;
   if (kind === 'video' && provider === 'tencent') return '腾讯云 MPS 使用 TC3 签名；参考图片必须是外网可访问 URL，返回的视频地址会立即转存。';
-  if (kind === 'audio' && provider === 'ark') return '豆包语音合成模型 2.0 使用 V3 Agent Plan HTTP 接口；模型版本与默认音色由应用固定管理，HTTP URL 可按企业代理调整。';
+  if (kind === 'audio' && provider === 'ark') return '豆包语音合成模型使用 V3 Agent Plan HTTP 接口；默认模型为 seed-tts-2.0，所选模型名会作为请求资源标识发送，HTTP URL 可按企业代理调整。';
   if (kind === 'audio' && provider === 'dashscope') return 'Qwen3-TTS-Flash 直接返回音频 URL；Instruct 版本支持额外的语气指令。';
   if (kind === 'audio' && provider === 'tencent') return '腾讯云使用 SyncDubbing，同步返回音频 URL 或 Base64；VoiceId 必填。';
   return '保存时会按所选服务商和模型执行一次真实连通性嗅探，成功后才替换当前配置。';
@@ -316,8 +316,7 @@ export function modelSettingsCard(kind: ModelKind, title: string, description: s
   const queueLabel = ({ language: '剧本与提示词', multimodal: '图片', video: '视频', audio: '语音' } as Record<ModelKind, string>)[kind];
   const concurrencyField = `<label>${queueLabel}队列并发数<input data-generation-concurrency type="number" min="1" max="8" step="1" value="${runtime.escapeHtml(config.generation_concurrency || 2)}" /><small>此队列同时执行的任务数量；范围 1–8，与其他模型队列互不占用。</small></label>`;
   const hint = modelCompatibilityHint(kind, provider, config.model);
-  const fixedProviderModel = kind === 'audio' && provider === 'ark';
-  return `<div class="settings-card model-settings-card" data-model-config-card data-model-kind="${kind}"><div class="settings-card-header"><div class="setting-icon">${icon}</div><div><h2>${title}</h2><p>${description}</p></div></div>${connectionFields}<p class="muted model-compatibility-hint">${runtime.escapeHtml(hint)}</p>${concurrencyField}${fixedProviderModel ? '' : modelChoiceEditorMarkup(models, config.model)}<button class="primary wide" data-save-model-config>${saveLabel}</button></div>`;
+  return `<div class="settings-card model-settings-card" data-model-config-card data-model-kind="${kind}"><div class="settings-card-header"><div class="setting-icon">${icon}</div><div><h2>${title}</h2><p>${description}</p></div></div>${connectionFields}<p class="muted model-compatibility-hint">${runtime.escapeHtml(hint)}</p>${concurrencyField}${modelChoiceEditorMarkup(models, config.model)}<button class="primary wide" data-save-model-config>${saveLabel}</button></div>`;
 }
 
 export function voiceCatalogCard() {

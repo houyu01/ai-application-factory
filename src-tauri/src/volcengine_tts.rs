@@ -15,7 +15,7 @@ pub(crate) const DEFAULT_FEMALE_SPEAKER: &str = "zh_female_vv_uranus_bigtts";
 /// A generally available Seed-TTS 2.0 male speaker used for male catalog voices.
 pub(crate) const DEFAULT_MALE_SPEAKER: &str = "zh_male_m191_uranus_bigtts";
 
-/// Normalize the settings fields owned by the fixed Seed-TTS 2.0 integration.
+/// Normalize V3 TTS settings while preserving the creator-selected model resource identifier.
 pub(crate) fn apply_seed_tts_two_defaults(profile: &mut Map<String, Value>) {
     let has_endpoint = profile
         .get("endpoint")
@@ -24,8 +24,32 @@ pub(crate) fn apply_seed_tts_two_defaults(profile: &mut Map<String, Value>) {
     if !has_endpoint {
         profile.insert("endpoint".to_owned(), json!(HTTP_ENDPOINT));
     }
-    profile.insert("model".to_owned(), json!(RESOURCE_ID));
-    profile.insert("models".to_owned(), json!([RESOURCE_ID]));
+    let model = profile
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(RESOURCE_ID)
+        .to_owned();
+    let mut models = profile
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .fold(Vec::new(), |mut values, value| {
+            if !values.iter().any(|saved| saved == value) {
+                values.push(value.to_owned());
+            }
+            values
+        });
+    if !models.contains(&model) {
+        models.insert(0, model.clone());
+    }
+    profile.insert("model".to_owned(), json!(model));
+    profile.insert("models".to_owned(), json!(models));
     profile.remove("app_id");
     profile.remove("resource_id");
     profile.remove("voice");
@@ -50,6 +74,8 @@ pub(crate) fn migrate_legacy_async_profile(profile: &mut Map<String, Value>) -> 
     if !(legacy_resource || legacy_model || legacy_endpoint) {
         return false;
     }
+    profile.remove("model");
+    profile.remove("models");
     apply_seed_tts_two_defaults(profile);
     true
 }
@@ -174,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_seed_tts_configuration_discards_unneeded_vendor_ids() {
+    fn seed_tts_configuration_defaults_model_and_discards_unneeded_vendor_ids() {
         let mut profile = Map::from_iter([
             ("app_id".to_owned(), json!("123")),
             ("resource_id".to_owned(), json!(RESOURCE_ID)),
@@ -186,9 +212,29 @@ mod tests {
 
         assert_eq!(profile["endpoint"], HTTP_ENDPOINT);
         assert_eq!(profile["model"], RESOURCE_ID);
+        assert_eq!(profile["models"], json!([RESOURCE_ID]));
         assert!(profile.get("app_id").is_none());
         assert!(profile.get("resource_id").is_none());
         assert!(profile.get("voice").is_none());
+    }
+
+    #[test]
+    fn seed_tts_configuration_preserves_a_creator_selected_model() {
+        let mut profile = Map::from_iter([
+            ("model".to_owned(), json!("seed-tts-2.0-custom")),
+            (
+                "models".to_owned(),
+                json!(["seed-tts-2.0", "seed-tts-2.0-custom"]),
+            ),
+        ]);
+
+        apply_seed_tts_two_defaults(&mut profile);
+
+        assert_eq!(profile["model"], "seed-tts-2.0-custom");
+        assert_eq!(
+            profile["models"],
+            json!(["seed-tts-2.0", "seed-tts-2.0-custom"])
+        );
     }
 
     #[test]

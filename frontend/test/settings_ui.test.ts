@@ -43,7 +43,7 @@ test('Volcengine audio profile uses the Seed-TTS 2.0 Agent Plan HTTP endpoint', 
   assert.deepEqual(profile.models, ['seed-tts-2.0']);
 });
 
-test('Volcengine audio card only asks for its HTTP URL and API key', () => {
+test('Volcengine audio card exposes the default model as an editable choice', () => {
   const audio = {
     kind: 'audio' as const,
     provider: 'ark' as const,
@@ -71,7 +71,9 @@ test('Volcengine audio card only asks for its HTTP URL and API key', () => {
 
   assert.match(markup, /豆包语音合成模型 2\.0 HTTP URL/);
   assert.match(markup, /豆包语音 API Key/);
-  assert.doesNotMatch(markup, /AppID|Resource-Id|Speaker|提交任务 URL|查询任务 URL|可选模型名/);
+  assert.match(markup, /可选模型名/);
+  assert.match(markup, /seed-tts-2\.0/);
+  assert.doesNotMatch(markup, /AppID|Resource-Id|Speaker|提交任务 URL|查询任务 URL/);
 });
 
 test('settings rerender restores the current main-pane scroll position', () => {

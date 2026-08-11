@@ -11,6 +11,12 @@ import type { ApiProject, GenerationTask } from './models.js';
 
 const DECOMPOSITION_STEPS = ['等待执行', '扩写剧本', '拆解分镜', '保存编辑内容'];
 const EXPANDING_SCREENPLAY_TITLE = '扩写剧本(点击上方“剧本”查看实时剧本)';
+export const MODEL_WAIT_NOTICE = '调用大模型过程等待时间可能较长，请耐心等待';
+
+/** Keep the model-wait guidance identical in the drama and game generation banners. */
+export function modelWaitNoticeMarkup() {
+  return `<p class="drama-decomposition-wait-notice">${MODEL_WAIT_NOTICE}</p>`;
+}
 
 function screenplayTask(project: ApiProject | null) {
   const tasks = [...(project?.tasks || [])].reverse();
@@ -83,7 +89,7 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
 }
 
 function progressMarkup() {
-  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><div class="drama-decomposition-progress-details"><span data-drama-decomposition-received hidden></span><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div></div>`;
+  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><div class="drama-decomposition-progress-details"><span data-drama-decomposition-received hidden></span><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div>${modelWaitNoticeMarkup()}</div>`;
 }
 
 function syncProgressIndicator(banner: HTMLElement, step: number, progress: number, failed: boolean, receivedChars?: number) {

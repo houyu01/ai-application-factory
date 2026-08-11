@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { generationCopy } from '../src/drama_decomposition_banner_ui.ts';
+import { generationCopy, modelWaitNoticeMarkup } from '../src/drama_decomposition_banner_ui.ts';
 import type { ApiProject, GenerationTask } from '../src/models.ts';
 
 const project: ApiProject = {
@@ -37,5 +37,12 @@ test('storyboard decomposition exposes the durable cumulative received-character
   assert.equal(
     generationCopy(project, task('script_decomposition', 68, '第011至20集分镜骨架（第2/3批），累计已接收16031字（本批8000字）')).receivedChars,
     16031,
+  );
+});
+
+test('generation progress shows a persistent model-wait notice', () => {
+  assert.equal(
+    modelWaitNoticeMarkup(),
+    '<p class="drama-decomposition-wait-notice">调用大模型过程等待时间可能较长，请耐心等待</p>',
   );
 });

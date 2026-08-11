@@ -27,7 +27,7 @@ cp .env.ios.example .env.ios
 npm run build:ipad
 ```
 
-该命令运行 `tauri ios build --export-method app-store-connect`，产物位于 `src-tauri/gen/apple/build/arm64/AI Application Factory.ipa`。当前 Bundle ID 是 `com.aiapplicationfactory.desktop`，在 Apple Developer 和 App Store Connect 创建 App ID / App 时必须完全一致；如需改为自己的反向域名，请先改 `src-tauri/tauri.conf.json` 的 `identifier`，再执行 `npx tauri ios init --ci --skip-targets-install` 重新生成 Xcode 工程。
+该命令运行 `tauri ios build --export-method app-store-connect`，IPA 产物位于 `src-tauri/gen/apple/build/arm64/`。当前 Bundle ID 是 `com.aiapplicationfactory.desktop`，在 Apple Developer 和 App Store Connect 创建 App ID / App 时必须完全一致；如需改为自己的反向域名，请先改 `src-tauri/tauri.conf.json` 的 `identifier`，再执行 `npx tauri ios init --ci --skip-targets-install` 重新生成 Xcode 工程。
 
 本机推荐使用 Xcode 自动签名：在 Xcode 的 Settings > Accounts 登录已加入 Apple Developer Program 的账户。Xcode 会管理 Apple Distribution 证书和 App Store Connect provisioning profile。自动签名用于 CI 时，在 `.env.ios` 中另填 `APPLE_API_ISSUER`、`APPLE_API_KEY` 和本机受保护的 `APPLE_API_KEY_PATH`；手动/CI 签名则填写 `IOS_CERTIFICATE`、`IOS_CERTIFICATE_PASSWORD`、`IOS_MOBILE_PROVISION` 三项 Base64 值。完整字段说明见 `.env.ios.example`。
 
