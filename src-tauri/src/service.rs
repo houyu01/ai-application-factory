@@ -22,6 +22,8 @@ mod game_cover;
 mod game_placeholder;
 #[path = "service_game_video.rs"]
 mod game_video;
+#[path = "service_game_video_batch.rs"]
+mod game_video_batch;
 #[path = "service_game_video_cancellation.rs"]
 mod game_video_cancellation;
 #[path = "service_game_video_history.rs"]

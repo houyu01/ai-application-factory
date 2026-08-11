@@ -128,6 +128,92 @@ fn game_material_images_keep_durable_history_and_variant_state() {
 }
 
 #[test]
+fn game_node_reference_images_only_enqueue_missing_materials_and_reuse_active_tasks() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let repository = Repository::new(
+        Database::open(root.join("ai_application_factory.db")).expect("test database"),
+    );
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("钟楼回声")),
+            (
+                "script".to_owned(),
+                json!("玩家在雨夜钟楼追踪失踪搭档，需要决定是否相信一段来源不明的录音。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    repository
+        .save_game_graph(
+            game_id,
+            &[
+                json!({"id":"hero","type":"character","name":"守夜人","prompt":"黑色风衣的钟楼守夜人"}),
+                json!({"id":"tower","type":"scene","name":"钟楼顶层","prompt":"雨夜的钟楼顶层"}),
+            ],
+            &[json!({"id":"opening","title":"抵达钟楼","original_text":"守夜人抵达钟楼顶层。","reference_asset_ids":["hero","tower"]})],
+            &[],
+        )
+        .expect("save graph");
+    let saved = repository.get_game(game_id).expect("load game");
+    let node_id = saved["nodes"][0]["id"].as_str().expect("node id");
+    let hero_id = saved["assets"]
+        .as_array()
+        .expect("assets")
+        .iter()
+        .find(|asset| asset["type"] == "character")
+        .and_then(|asset| asset["id"].as_str())
+        .expect("hero id");
+    let tower_id = saved["assets"]
+        .as_array()
+        .expect("assets")
+        .iter()
+        .find(|asset| asset["type"] == "scene")
+        .and_then(|asset| asset["id"].as_str())
+        .expect("tower id");
+    repository
+        .update_game_asset(
+            game_id,
+            tower_id,
+            Map::from_iter([("image_url".to_owned(), json!("media://tower"))]),
+        )
+        .expect("configure scene image");
+
+    let queued = repository
+        .enqueue_game_node_reference_images(game_id, node_id)
+        .expect("queue missing reference");
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0]["type"], "game_asset_image");
+    assert_eq!(queued[0]["resource_id"], hero_id);
+
+    let retried = repository
+        .enqueue_game_node_reference_images(game_id, node_id)
+        .expect("reuse active task");
+    assert_eq!(retried[0]["id"], queued[0]["id"]);
+
+    repository
+        .finish_game_asset_image(
+            game_id,
+            hero_id,
+            queued[0]["id"].as_str().expect("task id"),
+            "media://hero",
+        )
+        .expect("save generated image");
+    repository
+        .finish_game_task(
+            queued[0]["id"].as_str().expect("task id"),
+            SUCCEEDED,
+            None,
+            None,
+        )
+        .expect("finish task");
+    let error = repository
+        .enqueue_game_node_reference_images(game_id, node_id)
+        .expect_err("ready references do not queue new tasks");
+    assert!(error.to_string().contains("均已就绪"));
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
 fn game_cover_tasks_retain_reference_groups_and_every_requested_image() {
     let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
     let repository = Repository::new(

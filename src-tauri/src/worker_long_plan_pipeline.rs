@@ -197,11 +197,17 @@ impl DurableWorker {
                 previous,
             )?;
         }
-        assets.extend(planner::extracted_assets(
+        self.repository.update_drama_task_progress(
+            task_id,
+            75,
+            "正在复核剧本与人物、场景、道具的对应关系",
+        )?;
+        let assets = planner::review_assets(
             screenplay,
             project["theme"].as_str().unwrap_or("都市"),
-        ));
-        Ok(json!({"episodes":episodes,"assets":unique_assets(assets)}))
+            unique_assets(assets),
+        );
+        Ok(json!({"episodes":episodes,"assets":assets}))
     }
 
     fn commit_pending_inventory(

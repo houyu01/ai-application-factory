@@ -4,7 +4,10 @@ import test from 'node:test';
 import { applyQueuedGameImageTask } from '../src/game_asset_image_task_state.ts';
 import { closeGameEditorPanels } from '../src/game_asset_drawer_cleanup.ts';
 import { gameAssetPublicPromptDefault } from '../src/game_asset_public_prompt.ts';
+import { restoreGameAssetDrawerScroll } from '../src/game_asset_drawer_scroll.ts';
 import { gameMaterialRailMarkup } from '../src/game_material_rail.ts';
+import { gameNodeDurationOptions } from '../src/game_node_duration.ts';
+import { gameRelatedVideoFrameChoices } from '../src/game_upstream_frame_choices.ts';
 import type { Game } from '../src/models.ts';
 
 test('the game material rail exposes the full drama-style material catalog', () => {
@@ -27,6 +30,51 @@ test('each game material type has a style-aware default public prompt', () => {
   assert.match(gameAssetPublicPromptDefault(game, 'character'), /六个等尺寸的表情/);
   assert.match(gameAssetPublicPromptDefault(game, 'character'), /第三排四个全身动作/);
 });
+
+test('game node duration uses five through ten second choices', () => {
+  const options = gameNodeDurationOptions(15);
+
+  assert.match(options, /<option value="5">5 秒<\/option>/);
+  assert.match(options, /<option value="10" selected>10 秒<\/option>/);
+  assert.doesNotMatch(options, /value="11"/);
+});
+
+test('game frame picker offers first and last frames from upstream and downstream video versions', () => {
+  const game = {
+    nodes: [
+      { id: 'earlier', title: '更早节点', video_history: [{ id: 'v0', url: '/media/earlier.mp4', status: '生成成功' }] },
+      { id: 'start', title: '入口', video_history: [{ id: 'v1', url: '/media/start.mp4', status: '生成成功' }] },
+      { id: 'target', title: '调查路径', video_history: [] },
+      { id: 'ending', title: '结局', video_history: [{ id: 'v2', url: '/media/ending.mp4', status: '生成成功' }] },
+      { id: 'other', title: '无关节点', video_history: [{ id: 'v3', url: '/media/other.mp4', status: '生成成功' }] },
+    ],
+    edges: [
+      { id: 'before', source_node_id: 'earlier', target_node_id: 'start', option_text: '抵达入口', sort_order: 1 },
+      { id: 'edge', source_node_id: 'start', target_node_id: 'target', option_text: '继续', sort_order: 1 },
+      { id: 'after', source_node_id: 'target', target_node_id: 'ending', option_text: '结局', sort_order: 1 },
+    ],
+  } as unknown as Game;
+
+  const choices = gameRelatedVideoFrameChoices(game, game.nodes![2]);
+
+  assert.deepEqual(choices.map(choice => [choice.nodeId, choice.videoId, choice.position, choice.relation]), [
+    ['earlier', 'v0', 'first', 'upstream'],
+    ['earlier', 'v0', 'last', 'upstream'],
+    ['start', 'v1', 'first', 'upstream'],
+    ['start', 'v1', 'last', 'upstream'],
+    ['ending', 'v2', 'first', 'downstream'],
+    ['ending', 'v2', 'last', 'downstream'],
+  ]);
+});
+
+test('game asset drawer keeps its position while generation re-renders it', () => {
+  const drawer = { scrollTop: 0 };
+
+  restoreGameAssetDrawerScroll(1248, drawer);
+
+  assert.equal(drawer.scrollTop, 1248);
+});
+
 
 test('queueing a material image keeps its loading state available to the open drawer', () => {
   const game = {

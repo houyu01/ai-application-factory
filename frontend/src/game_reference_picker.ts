@@ -7,11 +7,28 @@ const kinds: DramaPromptAssetType[] = ['character', 'scene', 'prop', 'placeholde
 const labels: Record<DramaPromptAssetType, string> = { character: '角色', scene: '场景', prop: '道具', placeholder: '占位图' };
 
 function assets(game: Game, kind?: DramaPromptAssetType) {
-  return (game.assets || []).filter(asset => kinds.includes(asset.type as DramaPromptAssetType) && (!kind || asset.type === kind));
+  return (game.assets || []).filter(asset => asset.game_id === game.id
+    && kinds.includes(asset.type as DramaPromptAssetType) && (!kind || asset.type === kind));
 }
 
 function reference(asset: GameAsset): Extract<DramaPromptNode, { type: 'reference' }> {
   return { type: 'reference', asset_id: asset.id, asset_type: asset.type as DramaPromptAssetType, label: asset.name, image_url: asset.image_url || null };
+}
+
+const canGenerateReferenceImage = (asset: GameAsset) => ['character', 'scene', 'prop'].includes(asset.type);
+const hasReferenceImage = (asset: GameAsset) => Boolean(asset.image_url?.trim());
+const referenceImageTask = (game: Game, asset: GameAsset) => (game.tasks || []).find(task => task.type === 'game_asset_image' && task.resource_id === asset.id && task.status === '生成中');
+
+function referenceStatusMarkup(game: Game, selected: GameAsset[]) {
+  if (!selected.length) return '';
+  const unavailable = selected.filter(asset => !hasReferenceImage(asset));
+  if (!unavailable.length) return '<div class="drama-reference-status game-reference-status is-ready">✓ 当前参考素材已就绪（' + selected.length + ' 项）</div>';
+  const generatable = unavailable.filter(canGenerateReferenceImage);
+  const generating = generatable.some(asset => referenceImageTask(game, asset));
+  const action = generatable.length
+    ? `<button type="button" class="ghost compact" data-game-generate-reference-images${generating ? ' disabled' : ''}>${generating ? '⟳ 正在生成参考图…' : '一键生成参考图'}</button>`
+    : '';
+  return `<div class="drama-reference-status game-reference-status has-warning"><span>⚠ 有 ${unavailable.length} 个参考素材不可用，生成视频前请先生成图片或重新选择参考图。</span>${action ? `<div class="drama-reference-status-actions">${action}</div>` : ''}</div>`;
 }
 
 /** Renders the node's selected reusable materials as a horizontally scrolling card list. */
@@ -21,20 +38,23 @@ export function gameReferencePanelMarkup(game: Game, ids: readonly string[], run
     const image = asset.image_url ? `<img src="${runtime.escapeHtml(runtime.resolveMediaUrl(asset.image_url))}" alt="" />` : '<span>暂无图片</span>';
     return `<article class="game-reference-card" data-game-reference-card="${runtime.escapeHtml(asset.id)}"><span class="game-reference-card-image">${image}</span><span class="game-reference-card-copy"><b>${runtime.escapeHtml(asset.name)}</b><small>${labels[asset.type as DramaPromptAssetType]}</small></span><button type="button" class="game-reference-remove" data-game-remove-reference="${runtime.escapeHtml(asset.id)}" aria-label="移除${runtime.escapeHtml(asset.name)}">×</button></article>`;
   }).join('') : '<p class="game-reference-empty">尚未添加参考图；可从角色、场景、道具或占位图中选择。</p>';
-  return `<section class="game-reference-panel"><div class="game-reference-panel-head"><button type="button" class="ghost compact" data-game-add-reference>＋ 添加参考图</button><div><h3>参考图</h3><p>选择当前视频节点使用的素材。</p></div></div><div class="game-reference-scroll">${cards}</div></section>`;
+  return `<section class="game-reference-panel"><div class="game-reference-panel-head"><button type="button" class="ghost compact" data-game-add-reference>＋ 添加参考图</button><div><h3>参考图</h3><p>选择当前视频节点使用的素材。</p></div></div><div class="game-reference-scroll">${cards}</div>${referenceStatusMarkup(game, selected)}</section>`;
 }
 
 /** Opens the short-drama-style asset chooser for multi-select or an @ mention insertion. */
 export function openGameReferencePicker(game: Game, selectedIds: readonly string[], runtime: Runtime, onComplete: (ids: string[]) => void, single = false) {
+  document.querySelectorAll('.game-reference-picker-backdrop').forEach(item => item.remove());
   let activeKind: DramaPromptAssetType = 'character';
   const selected = new Set(selectedIds);
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop drama-reference-picker-backdrop game-reference-picker-backdrop';
+  modal.dataset.gameReferenceGameId = game.id;
   modal.innerHTML = `<div class="modal drama-reference-picker"><button class="close" aria-label="关闭">×</button><div class="modal-head"><h2>${single ? '插入参考图' : '添加参考图'}</h2><p>${single ? '选择一张角色、场景、道具或占位图插入光标位置。' : '选择角色、场景、道具或占位图加入当前视频节点。'}</p></div><div class="drama-reference-picker-tabs">${kinds.map(kind => `<button type="button" class="${kind === activeKind ? 'active' : ''}" data-game-reference-kind="${kind}">${labels[kind]}</button>`).join('')}</div><div class="drama-reference-picker-body"></div><div class="drama-reference-picker-actions"><span class="drama-reference-picker-count">已选择 0 项</span><button type="button" class="ghost" data-game-reference-cancel>取消</button><button type="button" class="primary" data-game-reference-complete ${single ? 'hidden' : ''}>完成</button></div></div>`;
   document.body.append(modal);
   const body = modal.querySelector<HTMLElement>('.drama-reference-picker-body')!;
   const close = () => modal.remove();
   const render = () => {
+    if (!modal.isConnected || modal.dataset.gameReferenceGameId !== game.id) return;
     const options = assets(game, activeKind);
     body.innerHTML = options.length ? `<div class="drama-reference-picker-grid">${options.map(asset => {
       const checked = selected.has(asset.id); const image = asset.image_url ? `<img src="${runtime.escapeHtml(runtime.resolveMediaUrl(asset.image_url))}" alt="" />` : '<span class="drama-reference-picker-placeholder">＋</span>';

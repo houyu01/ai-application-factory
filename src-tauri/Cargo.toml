@@ -1,5 +1,6 @@
 [package]
 name = "ai-application-factory-desktop"
+default-run = "ai-application-factory"
 version = "0.1.0"
 description = "Local-first AI Application Factory desktop application"
 authors = ["houyu.hy <785798835@qq.com>"]
@@ -30,6 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "^2.0.0"
 thiserror = "2"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }

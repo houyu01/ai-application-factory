@@ -313,6 +313,7 @@ impl Repository {
         self.claim_game_task_types(&[
             "game_script_expansion",
             "game_graph_decomposition",
+            "game_node_prompt",
             "node_video_generation",
             "game_asset_image",
             "game_asset_variant_image",

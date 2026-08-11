@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { gameNodeVideoHistoryRecords, selectGameNodeVideoUrl, selectedGameNodeVideoId, selectedGameNodeVideoUrl } from '../src/game_node_video_history.ts';
+import { gameNodeVideoHistoryRecords, gameNodeVideoHistoryTime, selectGameNodeVideoUrl, selectedGameNodeVideoId, selectedGameNodeVideoUrl } from '../src/game_node_video_history.ts';
 import type { GameNode } from '../src/models.ts';
 
 function node(): GameNode {
@@ -23,6 +23,10 @@ test('game node history adds the durable generating task before its terminal rec
   assert.equal(records[0].id, 'task-3');
   assert.equal(records[0].status, '生成中');
   assert.equal(records[0].progress, 42);
+});
+
+test('game node history renders ISO timestamps as a human-readable second-level time', () => {
+  assert.equal(gameNodeVideoHistoryTime('2026-08-11T13:34:28.734585Z'), '2026-08-11 13:34:28');
 });
 
 test('game node history keeps a creator-selected previous version in the preview', () => {

@@ -133,6 +133,8 @@ pub(crate) fn migrate_legacy_schema(connection: &Connection) -> AppResult<()> {
         "game_nodes",
         &[
             ("prompt_rich_json", "TEXT NOT NULL DEFAULT '[]'"),
+            // Keeps the short-drama-compatible multi-shot / long-shot prompt choice per game node.
+            ("prompt_template_version", "TEXT NOT NULL DEFAULT 'v1'"),
             ("reference_asset_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("first_last_frames_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("placeholder_asset_id", "TEXT"),

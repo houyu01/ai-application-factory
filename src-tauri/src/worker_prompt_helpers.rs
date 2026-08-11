@@ -70,8 +70,13 @@ pub(super) fn rich_prompt_request(
     assets: &[Value],
     version: &str,
 ) -> String {
+    let transition_context = shot["transition_context"]
+        .as_str()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("\n互动视频节点衔接（最高优先级）：{value}"))
+        .unwrap_or_default();
     format!(
-        "模板版本：{version}\n短剧：{}\n分镜标题：{}\n分镜原文：{}\n风格：{}；画幅：{}；分辨率：{}；约束：{}\n候选素材（只能引用这些已生成图片的素材；带 variant_id 的角色条目就是一个独立角色形态，必须保留其 asset_id 和 variant_id 配对）：{}\n只返回 JSON：{{\"nodes\":[{{\"type\":\"text\",\"text\":\"...\"}},{{\"type\":\"reference\",\"asset_id\":\"角色素材ID\",\"variant_id\":\"可选的角色形态ID\",\"asset_type\":\"character|scene|prop|placeholder\",\"label\":\"素材或角色形态名称\"}}]}}。每个参考节点必须紧随其对应的“场景：”“角色：”或“道具：”字段，绝不可在配音后集中罗列。若当前分镜中的人物处于候选目录标注的幼年、成年、伤病、变身、换装或其他形态，必须引用该条目的 variant_id，不能退回引用角色基础形态。若分镜原文包含“【人物首次出场：当前名字｜人物描述：…】”，必须保留描述，并在人物首次清晰入画的对应镜头写入“【人物姓名标识｜姓名：当前角色素材的 name｜时长：1～2s｜位置：人物近旁且不遮挡脸部｜效果：快速淡入淡出】”；姓名优先使用候选素材中的当前 name，标识不是字幕，即使 subtitles 为 false 也必须保留且只出现一次。文字依次包含场景、角色、道具、风格、光线、位置、{}和每个镜头对应的配音；镜头头部必须为【镜头N | 时长Xs | 时间：日 外】。不要写图片 URL 或技术标识。",
+        "模板版本：{version}\n短剧：{}\n分镜标题：{}\n分镜原文：{}{transition_context}\n风格：{}；画幅：{}；分辨率：{}；约束：{}\n候选素材（只能引用这些已生成图片的素材；带 variant_id 的角色条目就是一个独立角色形态，必须保留其 asset_id 和 variant_id 配对）：{}\n只返回 JSON：{{\"nodes\":[{{\"type\":\"text\",\"text\":\"...\"}},{{\"type\":\"reference\",\"asset_id\":\"角色素材ID\",\"variant_id\":\"可选的角色形态ID\",\"asset_type\":\"character|scene|prop|placeholder\",\"label\":\"素材或角色形态名称\"}}]}}。每个参考节点必须紧随其对应的“场景：”“角色：”或“道具：”字段，绝不可在配音后集中罗列。若当前分镜中的人物处于候选目录标注的幼年、成年、伤病、变身、换装或其他形态，必须引用该条目的 variant_id，不能退回引用角色基础形态。若分镜原文包含“【人物首次出场：当前名字｜人物描述：…】”，必须保留描述，并在人物首次清晰入画的对应镜头写入“【人物姓名标识｜姓名：当前角色素材的 name｜时长：1～2s｜位置：人物近旁且不遮挡脸部｜效果：快速淡入淡出】”；姓名优先使用候选素材中的当前 name，标识不是字幕，即使 subtitles 为 false 也必须保留且只出现一次。文字依次包含场景、角色、道具、风格、光线、位置、{}和每个镜头对应的配音；镜头头部必须为【镜头N | 时长Xs | 时间：日 外】。不要写图片 URL 或技术标识。",
         project["name"].as_str().unwrap_or("短剧"), shot["title"].as_str().unwrap_or("分镜"), shot["original_text"].as_str().unwrap_or_default(), project["style"].as_str().unwrap_or("真人风格"), project["ratio"].as_str().unwrap_or("9:16"), project["resolution"].as_str().unwrap_or("720p"), project["shot_constraints"], format!("{:?}", assets), if version == "v2" { "一个完整连续长镜头" } else { "2 到 3 个连续镜头" },
     )
 }

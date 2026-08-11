@@ -2,11 +2,26 @@
 
 use std::collections::HashSet;
 
+use super::prop_evidence::prop_names;
+
 const CHARACTER_MARKERS: &[&str] = &["人物首次出现：", "人物首次出现:", "角色：", "角色:"];
 const CHARACTER_ACTIONS: &[&str] = &[
     "蹲", "站", "坐", "走", "跑", "冲", "举", "拎", "抱", "拿", "握", "递", "推", "拉", "跪", "挥",
-    "拍", "喊", "哭", "笑", "喝", "吻", "扇", "指", "追", "扑", "踹", "开枪", "拔剑", "推门",
+    "拍", "喊", "哭", "笑", "喝", "吻", "扇", "指", "追", "扑", "踹", "叼", "开枪", "拔剑", "推门",
     "说道", "问道", "答道",
+];
+const CHARACTER_MANIFEST_MARKERS: &[&str] = &[
+    "出场角色与道具",
+    "出场角色",
+    "出场人物",
+    "登场角色",
+    "登场人物",
+    "角色清单",
+    "人物清单",
+];
+const NON_PERSON_SUFFIXES: &[&str] = &[
+    "衫", "衣", "裤", "鞋", "帽", "镜", "袋", "筐", "瓜", "藤", "报告", "手册", "样品", "烟袋",
+    "孙女",
 ];
 const STABLE_TITLES: &[&str] = &[
     "大师兄",
@@ -88,48 +103,6 @@ const SCENE_SUFFIXES: &[&str] = &[
     "警局",
     "墓园",
 ];
-const PROP_TERMS: &[&str] = &[
-    "牛皮纸袋",
-    "录音机",
-    "身份证",
-    "遥控器",
-    "玉扳指",
-    "玉佩",
-    "令牌",
-    "牛皮纸",
-    "长剑",
-    "短剑",
-    "宝剑",
-    "佩剑",
-    "铁刀",
-    "手枪",
-    "匕首",
-    "药瓶",
-    "卷轴",
-    "玉简",
-    "账本",
-    "钥匙",
-    "照片",
-    "信件",
-    "书信",
-    "木盒",
-    "盒子",
-    "包裹",
-    "地图",
-    "手机",
-    "电脑",
-    "酒杯",
-    "木牌",
-    "符箓",
-    "剑柄",
-    "西瓜",
-    "剑",
-];
-const PROP_ACTIONS: &[&str] = &[
-    "拿", "拎", "举", "抱", "握", "递", "找", "寻", "掏", "打开", "关上", "放下", "收起", "使用",
-    "展示", "摊开", "塞进", "拔出", "指着", "啃", "吃", "喝", "戴上", "摘下", "挂起", "摆着",
-    "放着", "放",
-];
 
 /// Canonical, source-backed asset names available to a single decomposition request.
 pub(crate) struct AssetEvidence {
@@ -148,13 +121,15 @@ impl AssetEvidence {
                 .chain(dialogue_character_names(script))
                 .chain(action_character_names(script))
                 .chain(stable_title_names(script))
+                .chain(manifest_character_names(script))
                 .collect(),
         );
+        let props = prop_names(script, &characters);
         Self {
             script: script.to_owned(),
             characters,
             scenes: unique(scene_names(script)),
-            props: specific_names(prop_names(script)),
+            props,
         }
     }
 
@@ -174,6 +149,9 @@ impl AssetEvidence {
         supplied_name: &str,
         source_evidence: &str,
     ) -> Option<String> {
+        if kind == "prop" && supplied_name.contains(['、', '，', ',', '/', '／']) {
+            return None;
+        }
         let source_evidence = source_evidence.trim();
         if source_evidence.is_empty()
             || source_evidence.chars().count() > 48
@@ -251,6 +229,51 @@ fn stable_title_names(script: &str) -> Vec<String> {
         .collect()
 }
 
+fn manifest_character_names(script: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    for marker in CHARACTER_MANIFEST_MARKERS {
+        for (offset, _) in script.match_indices(marker) {
+            let tail = &script[offset + marker.len()..];
+            let Some(tail) = tail.strip_prefix('：').or_else(|| tail.strip_prefix(':')) else {
+                continue;
+            };
+            names.extend(names_in_manifest(tail.lines().next().unwrap_or_default()));
+        }
+    }
+    names
+}
+
+fn names_in_manifest(value: &str) -> Vec<String> {
+    let characters = value.chars().collect::<Vec<_>>();
+    characters
+        .iter()
+        .enumerate()
+        .filter(|(_, character)| COMMON_SURNAMES.contains(character))
+        .filter_map(|(index, _)| manifest_name_at(&characters, index))
+        .collect()
+}
+
+fn manifest_name_at(characters: &[char], start: usize) -> Option<String> {
+    let tail = characters[start..]
+        .iter()
+        .take_while(|character| is_cjk(**character))
+        .take(4)
+        .collect::<Vec<_>>();
+    (2..=tail.len()).rev().find_map(|length| {
+        let name = tail[..length].iter().copied().collect::<String>();
+        let after = characters[start + length..].iter().collect::<String>();
+        (plausible_character(&name)
+            && (after
+                .chars()
+                .next()
+                .is_none_or(|character| !is_cjk(character))
+                || CHARACTER_ACTIONS
+                    .iter()
+                    .any(|action| after.starts_with(action))))
+        .then_some(name)
+    })
+}
+
 fn scene_names(script: &str) -> Vec<String> {
     let mut names = Vec::new();
     for label in SCENE_LABELS {
@@ -323,44 +346,6 @@ fn is_time_word(word: &str) -> bool {
     .contains(&word)
 }
 
-fn prop_names(script: &str) -> Vec<String> {
-    let explicit = ["道具：", "道具:", "物品：", "物品:"]
-        .into_iter()
-        .flat_map(|marker| script.match_indices(marker))
-        .filter_map(|(offset, marker)| {
-            script[offset + marker.len()..]
-                .split(['\n', '。', '，', '；'])
-                .next()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-        });
-    explicit
-        .chain(PROP_TERMS.iter().filter_map(|term| {
-            script
-                .match_indices(term)
-                .any(|(offset, _)| prop_is_used(script, offset, term.len()))
-                .then(|| (*term).to_owned())
-        }))
-        .collect()
-}
-
-fn prop_is_used(script: &str, offset: usize, length: usize) -> bool {
-    let start = script[..offset]
-        .char_indices()
-        .rev()
-        .nth(10)
-        .map(|(index, _)| index)
-        .unwrap_or(0);
-    let end = script[offset + length..]
-        .char_indices()
-        .nth(10)
-        .map(|(index, _)| offset + length + index)
-        .unwrap_or(script.len());
-    let context = &script[start..end];
-    PROP_ACTIONS.iter().any(|action| context.contains(action))
-}
-
 fn starts_action(value: &str) -> bool {
     let value = value.trim_start_matches(|character: char| !is_cjk(character));
     CHARACTER_ACTIONS
@@ -418,6 +403,9 @@ fn plausible_character(name: &str) -> bool {
         && !name
             .chars()
             .any(|character| NON_NAME_CHARS.contains(&character))
+        && !NON_PERSON_SUFFIXES
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
         && (COMMON_SURNAMES.contains(&name.chars().next().unwrap_or_default())
             || STABLE_TITLES.contains(&name))
 }
@@ -427,21 +415,6 @@ fn unique(values: Vec<String>) -> Vec<String> {
     values
         .into_iter()
         .filter(|value| seen.insert(value.to_owned()))
-        .collect()
-}
-
-fn specific_names(values: Vec<String>) -> Vec<String> {
-    let values = unique(values);
-    values
-        .iter()
-        .enumerate()
-        .filter(|(index, name)| {
-            !values
-                .iter()
-                .enumerate()
-                .any(|(other_index, other)| index != &other_index && other.contains(name.as_str()))
-        })
-        .map(|(_, name)| name.to_owned())
         .collect()
 }
 

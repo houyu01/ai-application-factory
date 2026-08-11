@@ -5,8 +5,14 @@ import type { DramaPromptAssetType, DramaPromptNode, Game, GameNode } from './mo
 type Runtime = { escapeHtml: (value: unknown) => string; resolveMediaUrl: (value?: string | null) => string };
 type SerializedPrompt = { nodes: DramaPromptNode[]; prompt: string };
 
+/** Returns whether a native deletion key must remain inside the game prompt editor. */
+export function isGamePromptEditorDeletionKey(key: string) {
+  return key === 'Delete' || key === 'Backspace';
+}
+
 function referenceAssets(game: Game) {
-  return (game.assets || []).filter(asset => ['character', 'scene', 'prop', 'placeholder'].includes(asset.type));
+  return (game.assets || []).filter(asset => asset.game_id === game.id
+    && ['character', 'scene', 'prop', 'placeholder'].includes(asset.type));
 }
 
 /** Lists the reusable game materials that can become short-drama-style prompt chips. */
@@ -190,6 +196,9 @@ export function bindGameRichPromptEditor(options: EditorOptions) {
   renderGamePromptNodes(editor, options.game, options.runtime, gamePromptNodes(options.node, options.game));
   sync(false);
   editor.addEventListener('input', () => sync());
+  editor.addEventListener('keydown', event => {
+    if (isGamePromptEditorDeletionKey(event.key)) event.stopPropagation();
+  });
   editor.addEventListener('mouseup', rememberSelection);
   editor.addEventListener('keyup', rememberSelection);
   editor.addEventListener('focus', rememberSelection);

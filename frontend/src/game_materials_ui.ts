@@ -6,11 +6,14 @@ import { gameAssetKinds as assetKinds, gameMaterialLabel, gameMaterialRailItems 
 import { openGameAssetDrawer } from './game_asset_drawer_ui.js';
 import { openGameCoverModal } from './game_cover_ui.js';
 import { openGamePlaceholderModal as openGamePlaceholderEditor } from './game_placeholder_ui.js';
+import { applyQueuedGameImageTask } from './game_asset_image_task_state.js';
 import { bindGameRichPromptEditor, gamePromptReferenceAssetIds, readGamePromptNodes, renderGamePromptNodes, serializeGamePromptNodes } from './game_prompt_rich.js';
 import { gameReferenceNode, gameReferencePanelMarkup, openGameReferencePicker } from './game_reference_picker.js';
+import { gameNodeDurationOptions } from './game_node_duration.js';
 import { syncGameNodeVideoCancellation } from './game_node_video_cancellation.js';
 import { selectedGameNodeVideoUrl } from './game_node_video_history.js';
 import { syncGameNodeVideoHistory } from './game_node_video_history_ui.js';
+import { openGameFramesModal } from './game_frame_modal.js';
 import './game_node_prompt.css';
 
 export type GameMaterialRuntime = {
@@ -37,7 +40,6 @@ const labelFor = gameMaterialLabel;
 const assetFor = (game: Game, id?: string | null) => game.assets?.find(asset => asset.id === id);
 const nodeFor = (game: Game, id?: string | null) => game.nodes?.find(node => node.id === id);
 const escape = (rt: Runtime, value: unknown) => rt.escapeHtml(value);
-const nodeVideoDuration = (value: unknown) => Math.min(15, Math.max(4, Number(value) || 10));
 
 export { gameMaterialRailMarkup };
 
@@ -47,13 +49,13 @@ export function bindGameMaterialInteractions(game: Game, rt: Runtime, findTask: 
   document.querySelectorAll<HTMLElement>('[data-game-open-material]').forEach(button => button.addEventListener('click', () => {
     const kind = button.dataset.gameOpenMaterial as RailKind;
     if (assetKinds.some(item => item.type === kind)) openGameAssetDrawer(game, kind as AssetKind, rt, refresh);
-    else if (kind === 'frames') openFramesModal(game, rt, refresh);
+    else if (kind === 'frames') openGameFramesModal(game, rt, refresh, lastSelectedNodeId || undefined);
     else if (kind === 'placeholder') openGamePlaceholderEditor(game, rt, refresh);
     else openGameCoverModal(game, rt, refresh);
   }));
 }
 
-/** Read the full node configuration from an active inspector before a toolbar save or node-video task. */
+/** Read the full node configuration from an active inspector before a node-specific save or video task. */
 export function gameNodeFormPayload(inspector: HTMLElement) {
   const value = (selector: string) => (inspector.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value;
   const prompt = inspector.querySelector<HTMLTextAreaElement>('#node-prompt');
@@ -61,7 +63,7 @@ export function gameNodeFormPayload(inspector: HTMLElement) {
   const references = inspector.dataset.gameReferenceAssetIds;
   return {
     title: value('#node-title'), original_text: value('#node-original'), prompt: value('#node-prompt'), duration_seconds: Number(value('#node-duration')),
-    prompt_rich: promptRich ? JSON.parse(promptRich) : [],
+    prompt_rich: promptRich ? JSON.parse(promptRich) : [], prompt_template_version: value('#node-prompt-template'),
     reference_asset_ids: references ? JSON.parse(references) : [],
   };
 }
@@ -84,8 +86,28 @@ function nodeVideoPreviewMarkup(node: GameNode, rt: Runtime) {
   return `<section class="game-node-video-preview"><div class="game-node-media-heading"><button class="primary compact" id="node-generate">生成节点视频</button><div class="game-node-preview-title"><div><h3>视频预览</h3><span class="status ${node.status === '生成中' ? 'running' : ''}">${escape(rt, node.status)}</span></div></div></div>${player}<div class="game-node-video-history" data-game-node-video-history></div></section>`;
 }
 
-function nodeInspectorMarkup(node: GameNode, rt: Runtime) {
-  return `<div class="inspector-head"><input id="node-title" class="game-node-title-input" value="${escape(rt, node.title)}" aria-label="节点标题" /><div class="game-node-head-actions"><span class="status ${node.status === '生成中' ? 'running' : ''}">${escape(rt, node.status)}</span></div></div><label>原始文本<textarea id="node-original" rows="4">${escape(rt, node.original_text)}</textarea></label><div class="game-node-media-workspace">${nodeVideoPreviewMarkup(node, rt)}<section class="game-node-prompt-panel"><div class="game-node-media-heading"><div><h3>视频提示词</h3><p>可输入 @ 或点击下方参考图，在光标位置插入图片引用。</p></div></div><div class="drama-rich-prompt-toolbar" data-game-prompt-toolbar></div><div class="game-rich-prompt-frame drama-rich-prompt-frame"><div class="game-rich-prompt-editor drama-rich-prompt-editor" contenteditable="true" role="textbox" aria-label="视频提示词"></div></div><textarea id="node-prompt" hidden>${escape(rt, node.prompt)}</textarea><div data-game-reference-panel></div></section></div><label>视频时长（秒）<input id="node-duration" type="number" min="4" max="15" value="${nodeVideoDuration(node.duration_seconds)}" /></label>`;
+function nodePromptFailureMarkup(task: GameTask | undefined, rt: Runtime) {
+  const error = task?.status === '生成失败' ? task.error_message || '语言模型未能生成该节点提示词。' : '';
+  return error ? `<p class="game-node-prompt-error" role="alert">提示词生成失败：${escape(rt, error)} 点击“重新生成提示词”只会重试当前节点。</p>` : '';
+}
+
+function syncNodePromptFailure(inspector: HTMLElement, task: GameTask | undefined) {
+  const error = task?.status === '生成失败' ? task.error_message || '语言模型未能生成该节点提示词。' : '';
+  const existing = inspector.querySelector<HTMLElement>('.game-node-prompt-error');
+  if (!error) { existing?.remove(); return; }
+  const message = `提示词生成失败：${error} 点击“重新生成提示词”只会重试当前节点。`;
+  if (existing) { existing.textContent = message; return; }
+  const feedback = document.createElement('p');
+  feedback.className = 'game-node-prompt-error';
+  feedback.setAttribute('role', 'alert');
+  feedback.textContent = message;
+  inspector.querySelector<HTMLElement>('[data-game-prompt-toolbar]')?.before(feedback);
+}
+
+function nodeInspectorMarkup(node: GameNode, rt: Runtime, promptTask?: GameTask) {
+  const version = node.prompt_template_version === 'v2' ? 'v2' : 'v1';
+  const promptLabel = promptTask?.status === '生成失败' ? '↻ 重新生成提示词' : '✣ 生成提示词';
+  return `<div class="inspector-head"><input id="node-title" class="game-node-title-input" value="${escape(rt, node.title)}" aria-label="节点标题" /><div class="game-node-head-actions"><span class="status ${node.status === '生成中' ? 'running' : ''}">${escape(rt, node.status)}</span></div></div><label>原始文本<textarea id="node-original" rows="4">${escape(rt, node.original_text)}</textarea></label><div class="game-node-media-workspace">${nodeVideoPreviewMarkup(node, rt)}<section class="game-node-prompt-panel"><div class="game-node-media-heading"><div class="game-node-prompt-actions"><label class="game-prompt-template-label"><select id="node-prompt-template" aria-label="提示词模板"><option value="v1"${version === 'v1' ? ' selected' : ''}>v1 · 多镜头</option><option value="v2"${version === 'v2' ? ' selected' : ''}>v2 · 长镜头</option></select></label><button type="button" class="ghost compact" id="node-save">保存节点配置</button><button type="button" class="ghost compact" id="node-generate-prompt">${promptLabel}</button></div><div class="game-node-prompt-title"><h3>视频提示词</h3></div></div>${nodePromptFailureMarkup(promptTask, rt)}<div class="drama-rich-prompt-toolbar" data-game-prompt-toolbar></div><div class="game-rich-prompt-frame drama-rich-prompt-frame"><div class="game-rich-prompt-editor drama-rich-prompt-editor" contenteditable="true" role="textbox" aria-label="视频提示词"></div></div><textarea id="node-prompt" hidden>${escape(rt, node.prompt)}</textarea><div data-game-reference-panel></div><section class="game-node-video-configurations" aria-label="视频配置"><label>视频时长（秒）<select id="node-duration">${gameNodeDurationOptions(node.duration_seconds)}</select></label></section></section></div>`;
 }
 
 /** Open the shared node inspector after either a canvas click or a material shortcut. */
@@ -96,8 +118,9 @@ export function selectGameNode(game: Game, nodeId: string, rt: Runtime, findTask
   lastSelectedNodeId = nodeId;
   inspector.dataset.gameSelected = `node:${nodeId}`;
   const task = findTask(game, 'node_video_generation', nodeId);
+  const promptTask = findTask(game, 'game_node_prompt', nodeId);
   let referenceIds = [...new Set(node.reference_asset_ids || [])];
-  inspector.innerHTML = nodeInspectorMarkup(node, rt);
+  inspector.innerHTML = nodeInspectorMarkup(node, rt, promptTask);
   const syncHistory = (currentTask = task) => syncGameNodeVideoHistory({ apiBaseUrl: rt.apiBaseUrl, game, inspector, node, resolveMediaUrl: rt.resolveMediaUrl, task: currentTask, toast: rt.toast, refresh });
   syncHistory();
   const syncReferencePanel = () => {
@@ -107,6 +130,24 @@ export function selectGameNode(game: Game, nodeId: string, rt: Runtime, findTask
     node.reference_asset_ids = referenceIds;
     panel.innerHTML = gameReferencePanelMarkup(game, referenceIds, rt);
     panel.querySelector('[data-game-add-reference]')?.addEventListener('click', () => openGameReferencePicker(game, referenceIds, rt, ids => { referenceIds = ids; syncReferencePanel(); }));
+    panel.querySelector<HTMLButtonElement>('[data-game-generate-reference-images]')?.addEventListener('click', async event => {
+      const button = event.currentTarget as HTMLButtonElement;
+      button.disabled = true;
+      button.textContent = '⟳ 正在创建任务…';
+      try {
+        await saveNode();
+        const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${nodeId}/reference-images/generate`, { method: 'POST' });
+        if (!response.ok) throw new Error(await errorMessage(response));
+        const payload = await response.json() as { tasks?: GameTask[] };
+        (payload.tasks || []).forEach(task => applyQueuedGameImageTask(game, task));
+        syncReferencePanel();
+        rt.toast(`已开始生成 ${payload.tasks?.length || 0} 个参考图`);
+        void refresh();
+      } catch (error) {
+        syncReferencePanel();
+        rt.toast(`参考图批量生成失败：${error instanceof Error ? error.message : '请稍后重试'}`);
+      }
+    });
     panel.querySelectorAll<HTMLElement>('[data-game-remove-reference]').forEach(button => button.addEventListener('click', () => {
       const id = button.dataset.gameRemoveReference || '';
       referenceIds = referenceIds.filter(item => item !== id);
@@ -136,6 +177,63 @@ export function selectGameNode(game: Game, nodeId: string, rt: Runtime, findTask
       if (item) onComplete(item);
     }, true),
   });
+  const template = inspector.querySelector<HTMLSelectElement>('#node-prompt-template');
+  const saveNodeButton = inspector.querySelector<HTMLButtonElement>('#node-save');
+  const generatePrompt = inspector.querySelector<HTMLButtonElement>('#node-generate-prompt');
+  const saveNode = async () => {
+    const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${nodeId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(gameNodeFormPayload(inspector)) });
+    if (!response.ok) throw new Error(await errorMessage(response));
+  };
+  saveNodeButton?.addEventListener('click', async () => {
+    saveNodeButton.disabled = true;
+    saveNodeButton.textContent = '保存中…';
+    try {
+      await saveNode();
+      rt.toast('节点配置已保存');
+      await refresh();
+    } catch (error) {
+      rt.toast(`节点配置保存失败：${error instanceof Error ? error.message : '请稍后重试'}`);
+    } finally {
+      if (saveNodeButton.isConnected) {
+        saveNodeButton.disabled = false;
+        saveNodeButton.textContent = '保存节点配置';
+      }
+    }
+  });
+  template?.addEventListener('change', async () => {
+    const previous = node.prompt_template_version === 'v2' ? 'v2' : 'v1';
+    template.disabled = true;
+    try {
+      await saveNode();
+      node.prompt_template_version = template.value;
+      rt.toast(template.value === 'v2' ? '长镜头模板已选择，下次生成提示词时生效' : '多镜头模板已选择，下次生成提示词时生效');
+    } catch (error) {
+      template.value = previous;
+      rt.toast(`提示词模板切换失败：${error instanceof Error ? error.message : '请稍后重试'}`);
+    } finally { template.disabled = false; }
+  });
+  if (generatePrompt) {
+    const running = promptTask?.status === '生成中';
+    rt.setGenerationButtonLoading(generatePrompt, running, promptTask?.status === '生成失败' ? '↻ 重新生成提示词' : '✣ 生成提示词');
+    if (running) generatePrompt.textContent = `⟳ 生成提示词 ${promptTask?.progress || 0}%`;
+    generatePrompt.addEventListener('click', async () => {
+      inspector.querySelector('.game-node-prompt-error')?.remove();
+      rt.setGenerationButtonLoading(generatePrompt, true, '✣ 生成提示词');
+      generatePrompt.textContent = '⟳ 生成提示词';
+      try {
+        await saveNode();
+        const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${nodeId}/prompt`, { method: 'POST' });
+        if (!response.ok) throw new Error(await errorMessage(response));
+        const queued = await response.json() as GameTask;
+        game.tasks = [...(game.tasks || []).filter(item => item.id !== queued.id), queued];
+        rt.toast('节点提示词任务已创建，将按所选模板拆解剧情并补齐参考图');
+        await refresh();
+      } catch (error) {
+        rt.setGenerationButtonLoading(generatePrompt, false, '✣ 生成提示词');
+        rt.toast(`节点提示词生成失败：${error instanceof Error ? error.message : '请稍后重试'}`);
+      }
+    });
+  }
   const generate = inspector.querySelector<HTMLButtonElement>('#node-generate');
   const syncVideoCancellation = (currentTask = task) => syncGameNodeVideoCancellation({ apiBaseUrl: rt.apiBaseUrl, game, node, task: currentTask, toast: rt.toast, onCancelled: refresh });
   const setGeneratingState = (queuedTask: GameTask) => {
@@ -148,7 +246,56 @@ export function selectGameNode(game: Game, nodeId: string, rt: Runtime, findTask
   };
   if (generate) { rt.setGenerationButtonLoading(generate, Boolean(task?.status === '生成中' || node.status === '生成中'), '生成节点视频'); if (task?.status === '生成中') generate.textContent = `⟳ 生成节点视频 ${task.progress || 0}%`; }
   syncVideoCancellation();
-  generate?.addEventListener('click', async () => { try { const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${nodeId}/video`, { method: 'POST' }); if (!response.ok) throw new Error(await errorMessage(response)); setGeneratingState(await response.json() as GameTask); rt.toast('节点视频任务已创建，已使用右上角保存的提示词与参考图配置'); await refresh(); } catch (error) { if (generate) rt.setGenerationButtonLoading(generate, false, '生成节点视频'); rt.toast(`节点视频任务创建失败：${error instanceof Error ? error.message : '请稍后重试'}`); } });
+  generate?.addEventListener('click', async () => { try { const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${nodeId}/video`, { method: 'POST' }); if (!response.ok) throw new Error(await errorMessage(response)); setGeneratingState(await response.json() as GameTask); rt.toast('节点视频任务已创建，已使用已保存的提示词与参考图配置'); await refresh(); } catch (error) { if (generate) rt.setGenerationButtonLoading(generate, false, '生成节点视频'); rt.toast(`节点视频任务创建失败：${error instanceof Error ? error.message : '请稍后重试'}`); } });
+}
+
+function syncNodeVideoPreview(inspector: HTMLElement, node: GameNode, rt: Runtime) {
+  const source = nodeVideoUrl(node) ? rt.resolveMediaUrl(nodeVideoUrl(node)) : '';
+  const existing = inspector.querySelector<HTMLElement>('.game-node-video-player, .game-node-video-placeholder');
+  if (!existing) return;
+  if (source && existing instanceof HTMLVideoElement) {
+    if (existing.getAttribute('src') !== source) { existing.src = source; existing.load(); }
+    return;
+  }
+  if (!source && !(existing instanceof HTMLVideoElement)) return;
+  const replacement = source ? document.createElement('video') : document.createElement('div');
+  replacement.className = source ? 'game-node-video-player' : 'game-node-video-placeholder';
+  if (replacement instanceof HTMLVideoElement) {
+    replacement.controls = true;
+    replacement.playsInline = true;
+    replacement.src = source;
+  } else replacement.innerHTML = '<div>✦</div><strong>生成视频后将在这里预览</strong><span>每次生成都会保留历史版本，可在下方切换。</span>';
+  existing.replaceWith(replacement);
+}
+
+/** Update a selected node's task affordances while preserving its rich-text editor and video element. */
+export function syncGameSelectedNode(game: Game, rt: Runtime, findTask: TaskFinder, refresh: () => Promise<void>) {
+  const inspector = document.querySelector<HTMLElement>('#game-inspector');
+  const [kind, nodeId] = inspector?.dataset.gameSelected?.split(':') || [];
+  const node = kind === 'node' ? nodeFor(game, nodeId) : undefined;
+  if (!inspector || !node) return;
+  inspector.querySelectorAll<HTMLElement>('.inspector-head .status,.game-node-preview-title .status').forEach(status => {
+    status.classList.toggle('running', node.status === '生成中');
+    status.textContent = node.status;
+  });
+  const promptTask = findTask(game, 'game_node_prompt', node.id);
+  const promptButton = inspector.querySelector<HTMLButtonElement>('#node-generate-prompt');
+  if (promptButton) {
+    const running = promptTask?.status === '生成中';
+    rt.setGenerationButtonLoading(promptButton, running, promptTask?.status === '生成失败' ? '↻ 重新生成提示词' : '✣ 生成提示词');
+    if (running) promptButton.textContent = `⟳ 生成提示词 ${promptTask?.progress || 0}%`;
+  }
+  syncNodePromptFailure(inspector, promptTask);
+  const videoTask = findTask(game, 'node_video_generation', node.id);
+  const generate = inspector.querySelector<HTMLButtonElement>('#node-generate');
+  if (generate) {
+    const running = videoTask?.status === '生成中' || node.status === '生成中';
+    rt.setGenerationButtonLoading(generate, running, '生成节点视频');
+    if (videoTask?.status === '生成中') generate.textContent = `⟳ 生成节点视频 ${videoTask.progress || 0}%`;
+  }
+  syncNodeVideoPreview(inspector, node, rt);
+  syncGameNodeVideoHistory({ apiBaseUrl: rt.apiBaseUrl, game, inspector, node, resolveMediaUrl: rt.resolveMediaUrl, task: videoTask, toast: rt.toast, refresh });
+  syncGameNodeVideoCancellation({ apiBaseUrl: rt.apiBaseUrl, game, node, task: videoTask, toast: rt.toast, onCancelled: refresh });
 }
 
 function assetCard(game: Game, asset: GameAsset, rt: Runtime) {
@@ -206,25 +353,7 @@ function openAssetEditorModal(game: Game, asset: GameAsset, rt: Runtime, refresh
 
 function selectableNode(game: Game, requested?: string | null) { return nodeFor(game, requested || lastSelectedNodeId) || game.nodes?.[0]; }
 function nodeOptions(game: Game, selectedId?: string) { return (game.nodes || []).map(node => `<option value="${node.id}"${node.id === selectedId ? ' selected' : ''}>${node.title}</option>`).join(''); }
-function referenceOptions(game: Game, selectedId?: string | null) { return `<option value="">不设置</option>${(game.assets || []).filter(asset => !['cover', 'cover_reference'].includes(asset.type)).map(asset => `<option value="${asset.id}"${asset.id === selectedId ? ' selected' : ''}>${asset.name}（${labelFor(asset.type)}）</option>`).join('')}`; }
 function imagePreview(game: Game, assetId?: string | null, rt?: Runtime) { const asset = assetFor(game, assetId); return asset?.image_url ? `<img src="${escape(rt!, asset.image_url)}" alt="${escape(rt!, asset.name)}" />` : `<span>${asset ? escape(rt!, asset.name) : '尚未设置'}</span>`; }
-
-function openFramesModal(game: Game, rt: Runtime, refresh: () => Promise<void>, requestedNodeId?: string) {
-  const selectedNode = selectableNode(game, requestedNodeId);
-  if (!selectedNode) { rt.toast('请等待视频节点生成后再配置首尾帧'); return; }
-  const modal = document.createElement('div');
-  modal.className = 'modal-backdrop game-frame-backdrop';
-  modal.innerHTML = `<div class="modal drama-frame-modal"><button type="button" class="close" aria-label="关闭">×</button><div class="modal-head"><h2>首尾帧 · ${escape(rt, selectedNode.title)}</h2><p>为当前视频节点选择首帧和尾帧，作为节点视频生成时的起止画面参考。</p></div><label class="game-material-node-picker">视频节点<select data-game-frame-node>${nodeOptions(game, selectedNode.id)}</select></label><div class="drama-frame-editor-grid">${(['first', 'last'] as const).map(side => `<section class="drama-frame-editor-card"><h3>${side === 'first' ? '输入首帧' : '输入尾帧'}</h3><div class="drama-frame-preview" data-game-frame-preview="${side}">${imagePreview(game, selectedNode.first_last_frames?.[side]?.asset_id, rt)}</div><div class="drama-frame-actions"><label class="ghost compact">选择${side === 'first' ? '首' : '尾'}帧<select data-game-frame-select="${side}">${referenceOptions(game, selectedNode.first_last_frames?.[side]?.asset_id)}</select></label></div></section>`).join('')}</div><div class="modal-actions"><button type="button" class="ghost" data-game-frame-clear>清除首尾帧</button><button type="button" class="primary" data-game-frame-save>完成</button></div></div>`;
-  document.body.append(modal);
-  const close = () => modal.remove();
-  modal.querySelector('.close')?.addEventListener('click', close);
-  const currentNode = () => nodeFor(game, modal.querySelector<HTMLSelectElement>('[data-game-frame-node]')?.value) || selectedNode;
-  const sync = () => { const node = currentNode(); modal.querySelectorAll<HTMLSelectElement>('[data-game-frame-select]').forEach(field => { const side = field.dataset.gameFrameSelect as 'first' | 'last'; field.value = node.first_last_frames?.[side]?.asset_id || ''; }); modal.querySelectorAll<HTMLElement>('[data-game-frame-preview]').forEach(preview => { const side = preview.dataset.gameFramePreview as 'first' | 'last'; preview.innerHTML = imagePreview(game, node.first_last_frames?.[side]?.asset_id, rt); }); };
-  modal.querySelector('[data-game-frame-node]')?.addEventListener('change', sync);
-  modal.querySelectorAll<HTMLSelectElement>('[data-game-frame-select]').forEach(field => field.addEventListener('change', () => { const preview = modal.querySelector<HTMLElement>(`[data-game-frame-preview="${field.dataset.gameFrameSelect}"]`); if (preview) preview.innerHTML = imagePreview(game, field.value, rt); }));
-  modal.querySelector('[data-game-frame-clear]')?.addEventListener('click', () => modal.querySelectorAll<HTMLSelectElement>('[data-game-frame-select]').forEach(field => { field.value = ''; field.dispatchEvent(new Event('change')); }));
-  modal.querySelector('[data-game-frame-save]')?.addEventListener('click', async event => { const button = event.currentTarget as HTMLButtonElement; const node = currentNode(); const frame = (side: 'first' | 'last') => { const id = modal.querySelector<HTMLSelectElement>(`[data-game-frame-select="${side}"]`)?.value; return id ? { asset_id: id } : null; }; button.disabled = true; button.textContent = '保存中…'; try { const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/nodes/${node.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_last_frames: { first: frame('first'), last: frame('last') } }) }); if (!response.ok) throw new Error(await errorMessage(response)); close(); rt.toast('首尾帧已保存'); await refresh(); } catch (error) { button.disabled = false; button.textContent = '完成'; rt.toast(`首尾帧保存失败：${error instanceof Error ? error.message : '请稍后重试'}`); } });
-}
 
 function openPlaceholderModal(game: Game, rt: Runtime, refresh: () => Promise<void>, requestedNodeId?: string) {
   const selectedNode = selectableNode(game, requestedNodeId);

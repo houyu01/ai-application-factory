@@ -286,6 +286,15 @@ impl MediaStore {
         self.save(&fs::read(source)?, "zip", "application/zip")
     }
 
+    /// Copy the completed ZIP owned by a durable export task into a creator-selected destination.
+    ///
+    /// The native desktop save command calls this only after verifying task ownership and completion.
+    /// Local media stays inside the app directory until this boundary copies it; remote configured-storage
+    /// ZIPs are downloaded through the same vetted http(s) path used by the export worker.
+    pub fn copy_video_export_zip(&self, source_url: &str, destination: &Path) -> AppResult<()> {
+        self.copy_for_video_export(source_url, destination)
+    }
+
     fn config(&self) -> AppResult<StorageConfig> {
         StorageConfig::from_values(
             self.repository

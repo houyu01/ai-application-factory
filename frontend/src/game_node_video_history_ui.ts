@@ -1,7 +1,7 @@
 /** Render game-node video versions with the same preview, refine, download, and delete affordances as drama videos. */
 
 import { confirmAction } from './confirmation_modal.js';
-import { gameNodeVideoHistoryRecords, selectGameNodeVideoUrl, selectedGameNodeVideoId, selectedGameNodeVideoUrl, type GameNodeVideoRecord } from './game_node_video_history.js';
+import { gameNodeVideoHistoryRecords, gameNodeVideoHistoryTime, selectGameNodeVideoUrl, selectedGameNodeVideoId, selectedGameNodeVideoUrl, type GameNodeVideoRecord } from './game_node_video_history.js';
 import type { Game, GameNode, GameTask } from './models.js';
 import { icon } from './ui_icons.js';
 import './game_node_video_history.css';
@@ -150,7 +150,8 @@ function historyEntry(options: Options, record: GameNodeVideoRecord, index: numb
   else preview.innerHTML = icon('history');
   const details = document.createElement('div');
   details.className = 'game-node-history-details';
-  details.innerHTML = `<strong>v${Math.max(1, index)}</strong><span class="status ${statusClass(record)}">${statusLabel(record)}</span>${record.createdAt ? `<small>${record.createdAt}</small>` : ''}`;
+  const createdAt = gameNodeVideoHistoryTime(record.createdAt);
+  details.innerHTML = `<strong>v${Math.max(1, index)}</strong><span class="status ${statusClass(record)}">${statusLabel(record)}</span>${createdAt ? `<small>${createdAt}</small>` : ''}`;
   const actions = document.createElement('div');
   actions.className = 'game-node-history-actions';
   if (record.status === '生成失败' && record.error) {

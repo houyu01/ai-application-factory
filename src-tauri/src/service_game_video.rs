@@ -18,7 +18,11 @@ impl DesktopService {
         self.repository.enqueue_game_node_video(game_id, node_id)
     }
 
-    fn validate_game_node_video_preflight(&self, game: &Value, node: &Value) -> AppResult<()> {
+    pub(super) fn validate_game_node_video_preflight(
+        &self,
+        game: &Value,
+        node: &Value,
+    ) -> AppResult<()> {
         let mut issues = Vec::new();
         if node["prompt"]
             .as_str()

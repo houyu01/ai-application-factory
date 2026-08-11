@@ -2,7 +2,11 @@
 
 use serde_json::{json, Value};
 
-use crate::{error::AppResult, service::DesktopService};
+use crate::{
+    error::{AppError, AppResult},
+    service::{game_video_batch::SERIAL_GAME_VIDEO_BATCH, DesktopService},
+    value::CANCELLED,
+};
 
 impl DesktopService {
     /// Stop a node-video task locally before asking its provider to cancel the remote job, so editor polling never restores a cancelled task.
@@ -26,5 +30,45 @@ impl DesktopService {
         }
         object.insert("cancelled_task_id".to_owned(), json!(task_id));
         Ok(task)
+    }
+
+    /// Stop every running game-node video and its serial coordinator locally before attempting provider cancellation for each remote job.
+    pub fn cancel_all_game_node_videos(&self, game_id: &str) -> AppResult<Value> {
+        self.repository.get_game(game_id)?;
+        let tasks = self
+            .repository
+            .active_game_tasks(game_id, "node_video_generation", None)?;
+        let batches =
+            self.repository
+                .active_game_tasks(game_id, SERIAL_GAME_VIDEO_BATCH, Some("all"))?;
+        if tasks.is_empty() && batches.is_empty() {
+            return Err(AppError::BadRequest(
+                "当前没有正在生成的视频任务".to_owned(),
+            ));
+        }
+        let cancelled = self.repository.cancel_all_game_node_video_tasks(game_id)?;
+        for batch in batches {
+            self.repository.cancel_game_task(
+                batch["id"].as_str().unwrap_or_default(),
+                "串行节点视频生成已取消",
+            )?;
+        }
+        let mut provider_errors = Vec::new();
+        for task in &tasks {
+            let provider_task_id = task["provider_task_id"].as_str().unwrap_or_default();
+            if provider_task_id.is_empty() {
+                continue;
+            }
+            if let Err(error) = self.worker_provider_cancel(provider_task_id) {
+                provider_errors.push(json!({"task_id": task["id"], "error": error.to_string()}));
+            }
+        }
+        Ok(json!({
+            "game_id": game_id,
+            "cancelled_count": cancelled.len(),
+            "cancelled_tasks": cancelled,
+            "provider_cancel_errors": provider_errors,
+            "status": CANCELLED,
+        }))
     }
 }

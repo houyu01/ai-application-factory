@@ -257,6 +257,8 @@ CREATE TABLE IF NOT EXISTS game_nodes (
 	prompt TEXT NOT NULL,
 	-- Rich prompt nodes retain each creator-placed @ reference chip across editor refreshes.
 	prompt_rich_json TEXT NOT NULL DEFAULT '[]',
+	-- Selected multi-shot or long-shot template used when this node regenerates its rich video prompt.
+	prompt_template_version TEXT NOT NULL DEFAULT 'v1',
 	video_url TEXT,
 	-- Completed history entry explicitly selected for this node; the editor preview and game runtime keep using it until the creator changes it.
 	selected_video_id TEXT,

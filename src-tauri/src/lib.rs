@@ -3,6 +3,7 @@
 mod api;
 mod api_game_routes;
 mod db;
+mod desktop_export_save;
 mod error;
 mod mapping;
 mod media;
@@ -29,9 +30,15 @@ mod tests_api_routes;
 #[cfg(test)]
 mod tests_asset_contracts;
 #[cfg(test)]
+mod tests_game_frame_references;
+#[cfg(test)]
+mod tests_game_generation_failures;
+#[cfg(test)]
 mod tests_game_graph_editing;
 #[cfg(test)]
 mod tests_game_material_images;
+#[cfg(test)]
+mod tests_game_regeneration;
 #[cfg(test)]
 mod tests_game_rich_prompts;
 #[cfg(test)]
@@ -100,6 +107,7 @@ pub fn run() {
                     .and_then(|value| value.to_str().ok()),
             )
         })
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let skill_directory = if cfg!(debug_assertions) {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
@@ -115,7 +123,10 @@ pub fn run() {
             app.manage(service);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![api_request])
+        .invoke_handler(tauri::generate_handler![
+            api_request,
+            desktop_export_save::save_video_export
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run AI Application Factory");
 }

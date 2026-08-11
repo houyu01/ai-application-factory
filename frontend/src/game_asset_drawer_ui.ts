@@ -6,6 +6,8 @@ import { icon } from './ui_icons.js';
 import { gameAssetKinds, gameMaterialLabel } from './game_material_rail.js';
 import { gameAssetPublicPrompt, gameAssetPublicPromptDefault } from './game_asset_public_prompt.js';
 import { closeGameAssetDrawer } from './game_asset_drawer_cleanup.js';
+import { restoreGameAssetDrawerScroll } from './game_asset_drawer_scroll.js';
+import { confirmAction } from './confirmation_modal.js';
 import type { GameMaterialRuntime } from './game_materials_ui.js';
 
 type AssetKind = typeof gameAssetKinds[number]['type'];
@@ -28,7 +30,7 @@ function sourceUrl(rt: GameMaterialRuntime, item: AssetItem) { return item.image
 function imageMarkup(item: AssetItem, type: string, rt: GameMaterialRuntime, generating: boolean) {
   if (generating || item.status === '生成中') return `<div class="drama-image-loading"><span class="generation-spinner"></span><small>生成中</small></div>`;
   const url = sourceUrl(rt, item);
-  if (url) return `<button type="button" class="drama-image-preview-trigger" data-game-preview-image="${url}" data-game-preview-label="${escape(rt, item.name)}"><img src="${url}" alt="${escape(rt, item.name)}" /></button>`;
+  if (url) return `<button type="button" class="drama-image-preview-trigger" data-drama-image-preview="${url}" data-drama-image-label="${escape(rt, item.name)}"><img src="${url}" alt="${escape(rt, item.name)}" /></button>`;
   return `<div class="drama-asset-placeholder">${type === 'character' ? icon('character') : type === 'scene' ? '✦' : '◆'}</div>`;
 }
 
@@ -60,16 +62,20 @@ export function gameAssetDrawerMarkup(game: Game, kind: AssetKind, rt: GameMater
 }
 
 /** Open the game material type drawer using the same structure and controls as the short-drama workbench. */
-export function openGameAssetDrawer(game: Game, kind: AssetKind, rt: GameMaterialRuntime, refresh: () => Promise<void>, opening = true) {
+export function openGameAssetDrawer(game: Game, kind: AssetKind, rt: GameMaterialRuntime, refresh: () => Promise<void>, opening = true, scrollTop?: number) {
   void rt.loadVoicePresets();
   closeGameAssetDrawer();
   const wrapper = document.createElement('div');
   wrapper.innerHTML = gameAssetDrawerMarkup(game, kind, rt, opening);
   const sheet = wrapper.firstElementChild as HTMLElement;
   document.body.append(sheet);
+  const drawer = sheet.querySelector<HTMLElement>('.game-material-sheet');
+  const restoreDrawerScroll = () => restoreGameAssetDrawerScroll(scrollTop, drawer);
+  restoreDrawerScroll();
+  requestAnimationFrame(() => { if (drawer?.isConnected) restoreDrawerScroll(); });
   const close = () => sheet.remove();
   const rerender = async (message?: string) => { close(); if (message) rt.toast(message); await refresh(); };
-  const rerenderGeneration = () => openGameAssetDrawer(game, kind, rt, refresh, false);
+  const rerenderGeneration = () => openGameAssetDrawer(game, kind, rt, refresh, false, drawer?.scrollTop);
   sheet.addEventListener('click', event => { if (event.target === sheet) close(); });
   sheet.querySelectorAll<HTMLElement>('[data-game-close-sheet]').forEach(button => button.addEventListener('click', close));
   sheet.querySelectorAll<HTMLElement>('[data-game-material-tab]').forEach(button => button.addEventListener('click', () => openGameAssetDrawer(game, button.dataset.gameMaterialTab as AssetKind, rt, refresh, false)));
@@ -80,19 +86,35 @@ export function openGameAssetDrawer(game: Game, kind: AssetKind, rt: GameMateria
   });
   sheet.querySelectorAll<HTMLElement>('[data-game-add-asset]').forEach(button => button.addEventListener('click', () => openAssetModal(game, kind, undefined, rt, refresh)));
   sheet.querySelectorAll<HTMLElement>('[data-game-edit-asset]').forEach(button => { const asset = assetOf(game, button.dataset.gameEditAsset || ''); if (asset) button.addEventListener('click', () => openAssetModal(game, kind, asset, rt, refresh)); });
-  sheet.querySelectorAll<HTMLElement>('[data-game-delete-asset]').forEach(button => button.addEventListener('click', async () => { const asset = assetOf(game, button.dataset.gameDeleteAsset || ''); if (!asset || !window.confirm(`确认删除${label(asset.type)}“${asset.name}”？节点内的引用将被自动清除。`)) return; const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/assets/${asset.id}`, { method: 'DELETE' }); if (response.ok) await rerender(`${label(asset.type)}已删除`); else rt.toast(`删除失败：${await errorMessage(response)}`); }));
+  sheet.querySelectorAll<HTMLElement>('[data-game-delete-asset]').forEach(button => button.addEventListener('click', async () => {
+    const asset = assetOf(game, button.dataset.gameDeleteAsset || '');
+    if (!asset || !await confirmAction({ title: '删除素材？', description: `确认删除${label(asset.type)}“${asset.name}”？节点内的引用将被自动清除，且无法恢复。`, confirmLabel: '删除素材' })) return;
+    try {
+      const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/assets/${asset.id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      await rerender(`${label(asset.type)}已删除`);
+    } catch (error) { rt.toast(`删除失败：${error instanceof Error ? error.message : '请稍后重试'}`); }
+  }));
   sheet.querySelectorAll<HTMLElement>('[data-game-generate-asset]').forEach(button => button.addEventListener('click', () => void runTask(game, `/assets/${button.dataset.gameGenerateAsset}/image`, '素材图片任务已创建', rt, refresh, rerenderGeneration)));
   sheet.querySelectorAll<HTMLElement>('[data-game-upload-asset]').forEach(button => { const asset = assetOf(game, button.dataset.gameUploadAsset || ''); if (asset) button.addEventListener('click', () => uploadAsset(game, asset, rt, refresh)); });
   sheet.querySelectorAll<HTMLElement>('[data-game-add-variant],[data-game-change-outfit]').forEach(button => { const asset = assetOf(game, button.dataset.gameAddVariant || button.dataset.gameChangeOutfit || ''); if (asset) button.addEventListener('click', () => openVariantModal(game, asset, undefined, Boolean(button.dataset.gameChangeOutfit), rt, refresh)); });
   sheet.querySelectorAll<HTMLElement>('[data-game-edit-variant]').forEach(button => { const asset = assetOf(game, button.dataset.gameEditVariant || ''); const variant = asset?.variants?.find(item => item.id === button.dataset.gameVariantId); if (asset && variant) button.addEventListener('click', () => openVariantModal(game, asset, variant, false, rt, refresh)); });
   sheet.querySelectorAll<HTMLElement>('[data-game-generate-variant]').forEach(button => button.addEventListener('click', () => void runTask(game, `/assets/${button.dataset.gameGenerateVariant}/variants/${button.dataset.gameVariantId}/image`, '形态图片任务已创建', rt, refresh, rerenderGeneration)));
-  sheet.querySelectorAll<HTMLElement>('[data-game-delete-variant]').forEach(button => button.addEventListener('click', async () => { const asset = assetOf(game, button.dataset.gameDeleteVariant || ''); const variant = asset?.variants?.find(item => item.id === button.dataset.gameVariantId); if (!asset || !variant || !window.confirm(`确认删除形态“${variant.name}”？`)) return; const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/assets/${asset.id}/variants/${variant.id}`, { method: 'DELETE' }); if (response.ok) await rerender('形态已删除'); else rt.toast(`形态删除失败：${await errorMessage(response)}`); }));
+  sheet.querySelectorAll<HTMLElement>('[data-game-delete-variant]').forEach(button => button.addEventListener('click', async () => {
+    const asset = assetOf(game, button.dataset.gameDeleteVariant || '');
+    const variant = asset?.variants?.find(item => item.id === button.dataset.gameVariantId);
+    if (!asset || !variant || !await confirmAction({ title: '删除形态？', description: `确认删除形态“${variant.name}”？此操作无法恢复。`, confirmLabel: '删除形态' })) return;
+    try {
+      const response = await fetch(`${rt.apiBaseUrl}/games/${game.id}/assets/${asset.id}/variants/${variant.id}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      await rerender('形态已删除');
+    } catch (error) { rt.toast(`形态删除失败：${error instanceof Error ? error.message : '请稍后重试'}`); }
+  }));
   sheet.querySelectorAll<HTMLElement>('[data-game-image-history]').forEach(button => button.addEventListener('click', () => { const asset = assetOf(game, button.dataset.gameParentAsset || ''); const item = asset?.id === button.dataset.gameImageHistory ? asset : asset?.variants?.find(variant => variant.id === button.dataset.gameImageHistory); if (item) openHistoryModal(item, asset?.id === item.id ? item.name : `${asset?.name || '素材'} · ${item.name}`, rt); }));
   sheet.querySelector('[data-game-open-asset-public]')?.addEventListener('click', () => openPublicPromptModal(game, kind, rt, refresh));
   sheet.querySelector('[data-game-toggle-search]')?.addEventListener('click', () => { const field = sheet.querySelector<HTMLElement>('.drama-asset-search'); if (field) { field.hidden = !field.hidden; field.querySelector<HTMLInputElement>('input')?.focus(); } });
   sheet.querySelector<HTMLInputElement>('[data-game-asset-search]')?.addEventListener('input', event => { const query = (event.target as HTMLInputElement).value.trim().toLowerCase(); sheet.querySelectorAll<HTMLElement>('[data-game-asset-card]').forEach(card => { card.hidden = Boolean(query) && !(card.dataset.assetName || '').includes(query); }); });
   sheet.querySelector('[data-game-toggle-filter]')?.addEventListener('click', () => rt.toast('当前素材可按名称搜索，生成状态会实时显示。'));
-  sheet.querySelectorAll<HTMLElement>('[data-game-preview-image]').forEach(button => button.addEventListener('click', () => openPreview(button.dataset.gamePreviewImage || '', button.dataset.gamePreviewLabel || '素材', rt)));
 }
 
 async function runTask(game: Game, path: string, message: string, rt: GameMaterialRuntime, refresh: () => Promise<void>, rerenderGeneration: () => void) {
@@ -132,10 +154,6 @@ function openPublicPromptModal(game: Game, kind: AssetKind, rt: GameMaterialRunt
 
 function openHistoryModal(item: AssetItem, title: string, rt: GameMaterialRuntime) {
   const history = item.image_history || []; const modal = document.createElement('div'); modal.className = 'modal-backdrop drama-image-history-backdrop';
-  modal.innerHTML = `<div class="modal drama-image-history-modal"><button class="close">×</button><div class="modal-head"><h2>${escape(rt, title)} · 图片历史</h2><p>保留每次生成的图片记录。</p></div><div class="drama-image-history-grid">${history.map((entry: GameAssetImageHistory, index) => `<article class="drama-image-history-item"><div>${entry.url ? `<img src="${escape(rt, rt.resolveMediaUrl(entry.url))}" alt="${escape(rt, title)}" />` : '图片不可用'}</div><span>第 ${history.length - index} 次</span><small>${escape(rt, entry.generated_at || '')}</small></article>`).join('') || '<p class="hint">暂无图片历史</p>'}</div></div>`;
+  modal.innerHTML = `<div class="modal drama-image-history-modal"><button class="close">×</button><div class="modal-head"><h2>${escape(rt, title)} · 图片历史</h2><p>保留每次生成的图片记录。</p></div><div class="drama-image-history-grid">${history.map((entry: GameAssetImageHistory, index) => { const url = entry.url ? rt.resolveMediaUrl(entry.url) : ''; return `<article class="drama-image-history-item"><div>${url ? `<button type="button" class="drama-image-preview-trigger" data-drama-image-preview="${escape(rt, url)}" data-drama-image-label="${escape(rt, title)} · 第 ${history.length - index} 次"><img src="${escape(rt, url)}" alt="${escape(rt, title)}" /></button>` : '图片不可用'}</div><span>第 ${history.length - index} 次</span><small>${escape(rt, entry.generated_at || '')}</small></article>`; }).join('') || '<p class="hint">暂无图片历史</p>'}</div></div>`;
   document.body.append(modal); modal.querySelector('.close')?.addEventListener('click', () => modal.remove());
-}
-
-function openPreview(url: string, title: string, rt: GameMaterialRuntime) {
-  const modal = document.createElement('div'); modal.className = 'modal-backdrop game-image-preview-backdrop'; modal.innerHTML = `<div class="modal game-image-preview-modal"><button class="close">×</button><h2>${escape(rt, title)}</h2><img src="${escape(rt, url)}" alt="${escape(rt, title)}" /></div>`; document.body.append(modal); modal.querySelector('.close')?.addEventListener('click', () => modal.remove());
 }

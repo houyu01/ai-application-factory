@@ -113,6 +113,56 @@ fn cancelling_a_game_video_task_keeps_the_last_playable_node_video() {
 }
 
 #[test]
+fn cancelling_all_game_video_tasks_keeps_a_cancelled_history_for_each_node() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let repository = Repository::new(
+        Database::open(root.join("ai_application_factory.db")).expect("test database"),
+    );
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("取消所有节点视频")),
+            (
+                "script".to_owned(),
+                json!("玩家在迷宫的两条岔路中探索，分别触发不同的机关与后果。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    repository
+        .save_game_graph(
+            game_id,
+            &[],
+            &[
+                json!({"id":"first","node_type":"start","title":"入口","original_text":"进入迷宫","prompt":"玩家走入迷宫入口","duration_seconds":10}),
+                json!({"id":"second","node_type":"normal","title":"岔路","original_text":"选择岔路","prompt":"玩家在石门前停下并选择方向","duration_seconds":10}),
+            ],
+            &[],
+        )
+        .expect("save graph");
+    let nodes = repository.get_game(game_id).expect("game")["nodes"]
+        .as_array()
+        .expect("nodes")
+        .to_vec();
+    for node in &nodes {
+        repository
+            .enqueue_game_node_video(game_id, node["id"].as_str().expect("node id"))
+            .expect("queue video");
+    }
+    let cancelled = repository
+        .cancel_all_game_node_video_tasks(game_id)
+        .expect("cancel all videos");
+    assert_eq!(cancelled.len(), 2);
+    for node in nodes {
+        let node = repository
+            .get_game_node(game_id, node["id"].as_str().expect("node id"))
+            .expect("cancelled node");
+        assert_eq!(node["status"], CANCELLED);
+        assert_eq!(node["video_history"][0]["status"], CANCELLED);
+    }
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
 fn game_video_history_retains_refinement_inputs_and_restores_previous_version_after_delete() {
     let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
     let repository = Repository::new(

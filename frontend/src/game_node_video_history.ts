@@ -16,6 +16,12 @@ export type GameNodeVideoRecord = {
 const versionUrl = new Map<string, string>();
 const nodeKey = (node: GameNode) => node.id;
 
+/** Format an ISO-like history timestamp as the second-level value shown on a video-version card. */
+export function gameNodeVideoHistoryTime(value?: string) {
+  const match = value?.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2}:\d{2})/);
+  return match ? `${match[1]} ${match[2]}` : '';
+}
+
 function record(video: GameNodeVideoHistory): GameNodeVideoRecord {
   return {
     id: String(video.id || video.task_id || video.url || ''),

@@ -1,6 +1,8 @@
 /** ZIP download dialog for assembling each episode from creator-selected video history versions. */
 import './drama_video_export.css';
 
+import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { activeDramaProject } from './drama_state.js';
 import { dramaVideoHistoryRecords, type DramaVideoHistoryRecord } from './drama_video_history.js';
 import { icon } from './ui_icons.js';
@@ -153,7 +155,8 @@ async function pollExportTask() {
     if (task.status === '生成成功') {
       const result = task.result as { url?: string; file_name?: string } | null;
       if (!result?.url) throw new Error('ZIP 已完成但找不到下载文件');
-      completeDownload(result.url, result.file_name || '短剧视频合集.zip');
+      if (state) state.taskId = undefined;
+      await completeDownload(taskId, result.url, result.file_name || '短剧视频合集.zip');
       return;
     }
     throw new Error(task.status === '已取消' ? '视频打包已取消' : task.error_message || '视频打包失败');
@@ -170,19 +173,78 @@ async function pollExportTask() {
   }
 }
 
-function completeDownload(url: string, fileName: string) {
+function isDesktopApp() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+function saveActionButton(dialog: HTMLElement, fileName: string, onClick: () => void) {
+  const existing = dialog.querySelector<HTMLButtonElement>('[data-video-export-save]');
+  if (existing) return existing;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'ghost drama-video-export-save';
+  button.dataset.videoExportSave = 'true';
+  button.innerHTML = `${icon('download')}<span>选择位置保存 ZIP</span>`;
+  button.title = `选择保存位置：${fileName}`;
+  button.addEventListener('click', onClick);
+  dialog.querySelector<HTMLElement>('[data-video-export-progress]')?.append(button);
+  return button;
+}
+
+async function saveDesktopZip(taskId: string, fileName: string) {
+  if (!state) return;
   const dialog = modal();
   if (!dialog) return;
   const stage = dialog.querySelector<HTMLElement>('[data-video-export-stage]');
-  if (stage) stage.textContent = 'ZIP 已准备完成，正在保存到本地。';
+  const button = saveActionButton(dialog, fileName, () => void saveDesktopZip(taskId, fileName));
+  button.disabled = true;
+  if (stage) stage.textContent = '请在系统窗口中选择 ZIP 的保存位置。';
+  try {
+    const destination = await save({
+      title: '保存短剧视频 ZIP',
+      defaultPath: fileName,
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+      canCreateDirectories: true,
+    });
+    if (!destination) {
+      if (stage) stage.textContent = '尚未保存 ZIP，可再次选择保存位置。';
+      return;
+    }
+    if (stage) stage.textContent = '正在保存 ZIP 到所选文件夹…';
+    await invoke('save_video_export', {
+      projectId: state.project.id,
+      taskId,
+      destination,
+    });
+    if (stage) stage.textContent = `ZIP 已保存至：${destination}`;
+    button.innerHTML = `${icon('download')}<span>重新选择位置保存</span>`;
+    rt().toast('视频 ZIP 已保存到所选文件夹');
+  } catch (error) {
+    if (stage) stage.textContent = 'ZIP 保存失败，请重新选择保存位置。';
+    setError(error instanceof Error ? error.message : '保存视频 ZIP 失败');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function completeDownload(taskId: string, url: string, fileName: string) {
+  const dialog = modal();
+  if (!dialog) return;
+  const stage = dialog.querySelector<HTMLElement>('[data-video-export-stage]');
+  if (stage) stage.textContent = 'ZIP 已准备完成。';
   const label = dialog.querySelector<HTMLElement>('[data-video-export-progress-label]');
   if (label) label.textContent = '100%';
   const progress = dialog.querySelector<HTMLProgressElement>('[data-video-export-progress-value]');
   if (progress) progress.value = 100;
+  if (isDesktopApp()) {
+    saveActionButton(dialog, fileName, () => void saveDesktopZip(taskId, fileName));
+    await saveDesktopZip(taskId, fileName);
+    return;
+  }
   const link = document.createElement('a');
   link.href = rt().resolveMediaUrl(url);
   link.download = fileName;
-  link.textContent = '如果未自动开始下载，请点击这里保存 ZIP';
+  link.textContent = '点击这里保存 ZIP';
   link.className = 'drama-video-export-result-link';
   dialog.querySelector<HTMLElement>('[data-video-export-progress]')?.append(link);
   link.click();

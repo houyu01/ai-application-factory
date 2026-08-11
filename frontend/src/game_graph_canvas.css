@@ -9,6 +9,30 @@
 
 .game-graph { background: transparent; }
 
+.game-node-video-loading {
+  position: absolute;
+  top: 12px;
+  right: 13px;
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff4e8;
+  color: #dc7521;
+  pointer-events: none;
+}
+
+.game-node-video-loading[hidden] { display: none; }
+
+.game-node-video-loading .generation-spinner {
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+
+:root[data-theme='dark'] .game-node-video-loading { background: #3b2b1e; color: #f0ab65; }
+
 :root[data-theme='dark'] .game-graph-viewport {
   background-color: #15171a;
   background-image: linear-gradient(#292c31 1px, transparent 1px), linear-gradient(90deg, #292c31 1px, transparent 1px);

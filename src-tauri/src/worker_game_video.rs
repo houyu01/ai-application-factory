@@ -39,7 +39,7 @@ impl DurableWorker {
                 )
             },
         );
-        let references = task["input_snapshot"]["reference_images"]
+        let mut references = task["input_snapshot"]["reference_images"]
             .as_array()
             .into_iter()
             .flatten()
@@ -47,7 +47,7 @@ impl DurableWorker {
             .filter_map(|url| self.media.provider_reference_url(url))
             .collect::<Vec<_>>();
         let voice_catalog = self.repository.voices()?;
-        let reference_audio = task["input_snapshot"]["reference_images"]
+        let mut reference_audio = task["input_snapshot"]["reference_images"]
             .as_array()
             .into_iter()
             .flatten()
@@ -59,11 +59,62 @@ impl DurableWorker {
                     .and_then(|url| self.media.provider_reference_url(url))
             })
             .collect::<Vec<_>>();
-        let prompt = append_voice_reference_notice(
+        let mut prompt = append_voice_reference_notice(
             &prompt,
             &task["input_snapshot"]["reference_images"],
             &voice_catalog,
         );
+        if let Some(frame) = task["input_snapshot"]["serial_first_frame"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+        {
+            let first_frame = self.media.provider_reference_url(frame).ok_or_else(|| {
+                AppError::BadRequest(
+                    "上一节点视频尾帧无法发送给视频模型，请稍后重试串行生成".to_owned(),
+                )
+            })?;
+            references.insert(0, first_frame);
+            reference_audio.insert(0, None);
+            prompt.push_str("\n\n串行连续性（最高优先级）：@图1 是上一视频节点的尾帧；本节点第一帧必须从该图的主体、构图、光线和状态自然衔接。");
+        }
+        let mut boundary_notes = Vec::new();
+        for frame in task["input_snapshot"]["frame_images"]
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let side = frame["side"].as_str().unwrap_or_default();
+            let raw = frame["url"].as_str().unwrap_or_default();
+            if raw.is_empty() || !matches!(side, "first" | "last") {
+                continue;
+            }
+            let reference = if raw.starts_with("data:image/") {
+                self.media
+                    .save_data_url(raw)
+                    .ok()
+                    .and_then(|url| self.media.provider_reference_url(&url))
+            } else {
+                self.media.provider_reference_url(raw)
+            }
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "所选{}帧无法发送给视频模型，请重新选择。",
+                    if side == "first" { "首" } else { "尾" }
+                ))
+            })?;
+            references.push(reference);
+            reference_audio.push(None);
+            boundary_notes.push(format!(
+                "@图{} 是输入{}帧；生成视频的{}帧必须复现该图的主体、构图、光线和状态。",
+                references.len(),
+                if side == "first" { "首" } else { "尾" },
+                if side == "first" { "首" } else { "尾" },
+            ));
+        }
+        if !boundary_notes.is_empty() {
+            prompt.push_str("\n\n首尾帧约束（高优先级）：");
+            prompt.push_str(&boundary_notes.join("\n"));
+        }
         let source_video = refinement
             .and_then(|details| details.get("source_video_url"))
             .and_then(Value::as_str)

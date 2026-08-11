@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     planner, skills,
     value::{CANCELLED, FAILED, GENERATING, SUCCEEDED},
 };
@@ -43,6 +43,7 @@ impl DurableWorker {
         let result = match task["type"].as_str().unwrap_or_default() {
             "game_script_expansion" => self.expand_game_screenplay(id, game_id),
             "game_graph_decomposition" => self.decompose_game_graph(id, game_id),
+            "game_node_prompt" => self.game_node_prompt(id, game_id, &task),
             "node_video_generation" => self.game_video(id, game_id, &task),
             "game_asset_image" => self.game_asset_image(
                 id,
@@ -114,7 +115,7 @@ impl DurableWorker {
             .complete_with_web_search_content_stream(
                 "language",
                 game["language_model"].as_str(),
-                "你是互动视频游戏编剧。输出具体、可视化、可拆分为视频节点的叙事正文。",
+                "你是互动视频游戏编剧。先确定或补全唯一、有真实姓名的主人公；绝不能让整部游戏没有主人公。输出具体、可视化、可拆分为视频节点的叙事正文。",
                 &prompt,
                 enable_web_search,
                 |delta| {
@@ -136,15 +137,10 @@ impl DurableWorker {
                 },
             )?
             .filter(|text| !text.trim().is_empty());
-        let expanded = response
-            .map(|text| join_game_screenplay(&existing, &text))
-            .unwrap_or_else(|| {
-                if continuing {
-                    existing
-                } else {
-                    planner::fallback_game_expansion(&game)
-                }
-            });
+        let response = response.ok_or_else(|| {
+            AppError::External("语言模型未返回互动游戏剧本，请检查模型配置后重试。".to_owned())
+        })?;
+        let expanded = join_game_screenplay(&existing, &response);
         if preview != expanded {
             self.persist_game_screenplay_preview(task_id, game_id, &expanded, target_chars)?;
         }
@@ -213,9 +209,20 @@ impl DurableWorker {
                 self.persist_game_graph_preview(task_id, game_id, response)?;
             }
         }
-        let plan = response
-            .and_then(|response| planner::model_game_plan(&response, &game))
-            .unwrap_or_else(|| planner::fallback_game_plan(&game));
+        let response = response.ok_or_else(|| {
+            AppError::External("语言模型未返回游戏图谱，请检查模型配置后重试。".to_owned())
+        })?;
+        self.repository.update_game_task_progress(
+            task_id,
+            78,
+            "正在复核剧本与人物、场景、道具的对应关系",
+        )?;
+        let plan = planner::model_game_plan(&response, &game).ok_or_else(|| {
+            AppError::External(
+                "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。"
+                    .to_owned(),
+            )
+        })?;
         self.repository
             .persist_game_graph_checkpoint(task_id, game_id, &plan)?;
         self.save_game_graph_checkpoint(task_id, game_id, &plan)
@@ -228,7 +235,8 @@ impl DurableWorker {
         game_id: &str,
         plan: &Value,
     ) -> AppResult<()> {
-        self.repository.save_game_graph(
+        self.repository.save_generated_game_graph(
+            task_id,
             game_id,
             plan["assets"].as_array().unwrap_or(&Vec::new()),
             plan["nodes"].as_array().unwrap_or(&Vec::new()),

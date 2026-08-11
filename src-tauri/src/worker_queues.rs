@@ -112,7 +112,11 @@ fn run_slot(worker: DurableWorker, queue: usize, slot: usize) {
             })
             .unwrap_or(false);
         let game_types = match queue {
-            0 => &["game_script_expansion", "game_graph_decomposition"][..],
+            0 => &[
+                "game_script_expansion",
+                "game_graph_decomposition",
+                "game_node_prompt",
+            ][..],
             1 => &[
                 "game_asset_image",
                 "game_asset_variant_image",

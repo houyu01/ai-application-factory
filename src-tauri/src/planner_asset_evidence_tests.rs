@@ -54,3 +54,37 @@ fn supports_fantasy_and_modern_script_labels() {
     assert!(evidence.names("prop").contains(&"令牌".to_owned()));
     assert!(evidence.names("prop").contains(&"照片".to_owned()));
 }
+
+#[test]
+fn explicit_prop_lists_keep_only_concrete_nouns() {
+    let script = "道具：你、爷爷、张磊、围观村民、铜烟袋、竹筐、蜜瓜、你背包里的农科站检测报告、石墩\n物品：你、张磊、爷爷、村支书李叔、蜜瓜样品、名片、茶缸、西瓜种植手册、吊扇\n爷爷拿起铜烟袋。";
+    let evidence = AssetEvidence::from_script(script);
+
+    assert_eq!(
+        evidence.names("prop"),
+        [
+            "铜烟袋",
+            "竹筐",
+            "蜜瓜",
+            "农科站检测报告",
+            "石墩",
+            "蜜瓜样品",
+            "名片",
+            "茶缸",
+            "西瓜种植手册",
+            "吊扇",
+        ]
+    );
+    assert_eq!(
+        evidence.canonical_name(
+            "prop",
+            "你、爷爷、铜烟袋",
+            "道具：你、爷爷、张磊、围观村民、铜烟袋、竹筐、蜜瓜、你背包里的农科站检测报告、石墩"
+        ),
+        None
+    );
+    assert_eq!(
+        evidence.canonical_name("prop", "爷爷的铜烟袋", "爷爷拿起铜烟袋。"),
+        Some("铜烟袋".to_owned())
+    );
+}

@@ -237,7 +237,7 @@ impl Repository {
         })
     }
 
-    fn enqueue_game_node_video_snapshot(
+    pub(crate) fn enqueue_game_node_video_snapshot(
         &self,
         game_id: &str,
         node_id: &str,
@@ -298,7 +298,12 @@ fn current_history_video<'a>(
         })
 }
 
-fn game_video_snapshot(game_id: &str, node_id: &str, game: &Value, node: &Value) -> Value {
+pub(crate) fn game_video_snapshot(
+    game_id: &str,
+    node_id: &str,
+    game: &Value,
+    node: &Value,
+) -> Value {
     let reference_ids = game_video_reference_ids(node);
     let references = game["assets"]
         .as_array()
@@ -307,6 +312,7 @@ fn game_video_snapshot(game_id: &str, node_id: &str, game: &Value, node: &Value)
         .filter(|asset| reference_ids.iter().any(|id| id == &asset["id"]))
         .map(|asset| json!({"id":asset["id"],"name":asset["name"],"type":asset["type"],"image_url":asset["image_url"],"prompt":asset["prompt"],"voice_id":asset["voice_id"]}))
         .collect::<Vec<_>>();
+    let frame_images = game_frame_images(node, game);
     json!({
         "game_id": game_id,
         "node_id": node_id,
@@ -315,10 +321,31 @@ fn game_video_snapshot(game_id: &str, node_id: &str, game: &Value, node: &Value)
         "reference_asset_ids": reference_ids,
         "reference_images": references,
         "first_last_frames": node["first_last_frames"],
+        "frame_images": frame_images,
         "placeholder_asset_id": node["placeholder_asset_id"],
         "placeholder_scene_asset_id": node["placeholder_scene_asset_id"],
         "placeholder_placements": node["placeholder_placements"],
     })
+}
+
+/// Freeze resolved asset images and captured upstream-video frames so retries keep the same visual boundary.
+fn game_frame_images(node: &Value, game: &Value) -> Vec<Value> {
+    ["first", "last"]
+        .into_iter()
+        .filter_map(|side| {
+            let frame = &node["first_last_frames"][side];
+            let url = frame["url"].as_str().or_else(|| {
+                let asset_id = frame["asset_id"].as_str()?;
+                game["assets"]
+                    .as_array()?
+                    .iter()
+                    .find(|asset| asset["id"].as_str() == Some(asset_id))?
+                    .get("image_url")?
+                    .as_str()
+            })?;
+            (!url.is_empty()).then(|| json!({"side": side, "url": url}))
+        })
+        .collect()
 }
 
 /// Match node-video task snapshots to the reference chips validated by the service boundary.

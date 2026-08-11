@@ -34,6 +34,10 @@ pub(crate) fn handle_game_route(
         ("POST", ["games", id, "expanded-script", "continue"]) => {
             (202, service.repository.continue_game_screenplay(id)?)
         }
+        ("POST", ["games", id, "expanded-script", "regenerate"]) => (
+            202,
+            service.repository.regenerate_game_screenplay(id, body()?)?,
+        ),
         ("POST", ["games", id, "expanded-script", "cancel"]) => {
             (202, service.repository.cancel_game_screenplay(id)?)
         }
@@ -120,11 +124,33 @@ pub(crate) fn handle_game_route(
         ("POST", ["games", id, "nodes", node, "placeholders", "image"]) => {
             (202, service.enqueue_game_placeholder(id, node, body()?)?)
         }
+        // The game node inspector saves its selected references, then requests durable image tasks only for missing reusable materials.
+        ("POST", ["games", id, "nodes", node, "reference-images", "generate"]) => (
+            202,
+            json!({"tasks":service.repository.enqueue_game_node_reference_images(id, node)?}),
+        ),
+        ("POST", ["games", id, "nodes", node, "prompt"]) => {
+            (202, service.repository.enqueue_game_node_prompt(id, node)?)
+        }
         ("POST", ["games", id, "nodes", node, "video"]) => {
             (202, service.enqueue_game_node_video(id, node)?)
         }
         ("POST", ["games", id, "nodes", node, "video", "cancel"]) => {
             (202, service.cancel_game_node_video(id, node)?)
+        }
+        ("POST", ["games", id, "videos", "serial"]) => {
+            (202, service.start_serial_game_node_video_batch(id)?)
+        }
+        ("POST", ["games", id, "videos", "serial", batch, "advance"]) => {
+            let values = body()?;
+            let last_frame = values.get("last_frame_data_url").and_then(Value::as_str);
+            (
+                202,
+                service.advance_serial_game_node_video_batch(id, batch, last_frame)?,
+            )
+        }
+        ("POST", ["games", id, "videos", "cancel"]) => {
+            (202, service.cancel_all_game_node_videos(id)?)
         }
         // The node-history check control updates the durable editor and runtime default, then returns the refreshed node.
         ("PUT", ["games", id, "nodes", node, "videos", video, "use-selection"]) => (

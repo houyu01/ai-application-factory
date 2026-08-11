@@ -28,7 +28,7 @@
   margin-left: 0;
   position: static;
   top: auto;
-  align-self: start;
+  align-self: start; max-height: none; overflow: visible;
 }
 
 .game-editor-layout[data-canvas-resized='true'] {

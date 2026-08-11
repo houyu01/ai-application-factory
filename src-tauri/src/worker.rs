@@ -30,6 +30,8 @@ mod game_asset_prompt;
 mod game_cover;
 #[path = "worker_game_placeholder.rs"]
 mod game_placeholder;
+#[path = "worker_game_prompt.rs"]
+mod game_prompt;
 #[path = "worker_game_video.rs"]
 mod game_video;
 #[path = "worker_lease.rs"]

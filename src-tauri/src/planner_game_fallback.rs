@@ -8,7 +8,19 @@ use crate::value::{ground_game_video_prompt, NOT_GENERATED};
 
 use crate::repository::game_validation::GAME_VIDEO_DURATION_RANGE;
 
-use super::{clip, expanded_or_source, fallback_assets, integer, place_nodes};
+use super::super::extracted_assets;
+use super::{clip, expanded_or_source, integer, place_nodes};
+
+fn fallback_assets(script: &str) -> Vec<Value> {
+    let assets = extracted_assets(script, "互动游戏");
+    if assets.is_empty() {
+        vec![
+            json!({"id":"character_001","type":"character","name":"主角","prompt":"叙述背景主题：互动游戏\n互动游戏主角，稳定外貌、服装和情绪特征。","status":NOT_GENERATED}),
+        ]
+    } else {
+        assets
+    }
+}
 
 /// Build a playable DAG with an immediate failure path and a converging investigation route.
 pub(crate) fn fallback_game_plan(game: &Value) -> Value {
@@ -363,8 +375,10 @@ fn fallback_node(
     text: &str,
     duration: i64,
 ) -> Value {
+    let text = format!("【{title}】{text}");
     let prompt = format!("场景：@图1（待选择场景），根据互动剧情保持连续场景。\n\n角色：@图2（待选择角色），围绕“{title}”推进。\n\n道具：@图3（待选择道具），保持前序节点中的数量、材质和位置连续。\n\n风格：{}，分辨率：{}。\n光线：根据当前抉择的情绪延续。\n位置：角色、场景和道具的空间关系清晰。\n镜头：一个完整连续镜头呈现行动与后果。\n前序承接：从前序视频的最后状态无缝继续。\n选择后果：视频结束后为下一节点提供明确分支。",game["style"].as_str().unwrap_or("真人风格"),game["resolution"].as_str().unwrap_or("720p"));
-    json!({"id":id,"node_type":kind,"title":title,"original_text":text,"prompt":ground_game_video_prompt(&prompt,text),"reference_asset_ids":[],"duration_seconds":duration,"status":NOT_GENERATED,"video_history":[]})
+    let prompt = ground_game_video_prompt(&prompt, &text);
+    json!({"id":id,"node_type":kind,"title":title,"original_text":text,"prompt":prompt,"reference_asset_ids":[],"duration_seconds":duration,"status":NOT_GENERATED,"video_history":[]})
 }
 
 fn clip_end(value: &str, limit: usize) -> String {

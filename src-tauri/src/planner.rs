@@ -11,17 +11,24 @@ mod asset_evidence;
 #[cfg(test)]
 #[path = "planner_asset_evidence_tests.rs"]
 mod asset_evidence_tests;
+#[path = "planner_asset_review.rs"]
+mod asset_review;
+#[cfg(test)]
+#[path = "planner_asset_review_tests.rs"]
+mod asset_review_tests;
 #[path = "planner_game.rs"]
 mod game_plan;
+#[path = "planner_prop_evidence.rs"]
+mod prop_evidence;
 #[path = "planner_references.rs"]
 mod reference_catalog;
 
 pub(crate) use asset_catalog::extracted_assets;
 pub(crate) use asset_evidence::AssetEvidence;
-pub(crate) use game_plan::{
-    fallback_game_expansion, fallback_game_plan, game_expansion_prompt, game_graph_prompt,
-    model_game_plan,
-};
+pub(crate) use asset_review::review_assets;
+#[cfg(test)]
+pub(crate) use game_plan::fallback_game_plan;
+pub(crate) use game_plan::{game_expansion_prompt, game_graph_prompt, model_game_plan};
 pub(crate) use reference_catalog::{
     key as reference_key, resolve_asset as resolve_reference_asset,
 };
@@ -83,11 +90,7 @@ pub fn model_drama_plan(
                 .then(|| json!({"id":asset["id"],"type":kind,"name":name,"prompt":prompt,"status":NOT_GENERATED}))
         })
         .collect::<Vec<_>>();
-    let assets = if assets.is_empty() {
-        extracted_assets(script, theme)
-    } else {
-        assets
-    };
+    let assets = review_assets(script, theme, assets);
     Some(json!({"episodes":episodes,"assets":assets}))
 }
 

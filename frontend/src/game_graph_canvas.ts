@@ -28,6 +28,11 @@ export function gameGraphGridStyle(scale: number, panX: number, panY: number) {
   return { size: `${24 * scale}px`, x: `${panX}px`, y: `${panY}px` };
 }
 
+/** Identify nodes with an active prompt or video task, the only states that need a canvas loader. */
+export function gameNodeTaskIsGenerating(game: Game, node: GameNode) {
+  return (game.tasks || []).some(task => ['game_node_prompt', 'node_video_generation'].includes(task.type) && task.resource_id === node.id && task.status === '生成中');
+}
+
 export function gameGraphCanvasMarkup(game: Game, escapeHtml: CanvasOptions['escapeHtml']) {
   const nodes = game.nodes || [];
   const edges = game.edges || [];
@@ -49,7 +54,10 @@ export function gameGraphCanvasMarkup(game: Game, escapeHtml: CanvasOptions['esc
     const shape = edgeShape(source, target, offsets.get(edge.id) || 0);
     return `<button type="button" class="game-edge-label" data-game-edge="${escapeHtml(edge.id)}" style="left:${shape.label.x + GRAPH_ORIGIN}px;top:${shape.label.y + GRAPH_ORIGIN}px" title="编辑选项：${escapeHtml(edge.option_text)}">${escapeHtml(edge.option_text)}</button>`;
   }).join('');
-  const cards = nodes.map(node => `<button type="button" class="game-node ${escapeHtml(node.node_type)}" data-game-node="${escapeHtml(node.id)}" style="left:${node.position_x + GRAPH_ORIGIN}px;top:${node.position_y + GRAPH_ORIGIN}px"><span class="game-node-type">${nodeTypeLabel(node.node_type)}</span><strong>${escapeHtml(node.title)}</strong><small>${node.duration_seconds}s · ${escapeHtml(node.status)}</small><span class="game-node-link-handle" data-game-link-source="${escapeHtml(node.id)}" title="拖到另一视频节点以新增选项" aria-label="从此节点创建选项">+</span></button>`).join('');
+  const cards = nodes.map(node => {
+    const generating = gameNodeTaskIsGenerating(game, node);
+    return `<button type="button" class="game-node ${escapeHtml(node.node_type)}${generating ? ' is-video-generating' : ''}" data-game-node="${escapeHtml(node.id)}"${generating ? ' aria-busy="true"' : ''} style="left:${node.position_x + GRAPH_ORIGIN}px;top:${node.position_y + GRAPH_ORIGIN}px"><span class="game-node-type">${nodeTypeLabel(node.node_type)}</span><strong>${escapeHtml(node.title)}</strong><small>${node.duration_seconds}s · ${escapeHtml(node.status)}</small><span class="game-node-video-loading" data-game-node-loading aria-hidden="true"${generating ? '' : ' hidden'}><span class="generation-spinner"></span></span><span class="game-node-link-handle" data-game-link-source="${escapeHtml(node.id)}" title="拖到另一视频节点以新增选项" aria-label="从此节点创建选项">+</span></button>`;
+  }).join('');
   return `<div class="game-graph-canvas" data-game-graph-canvas="${escapeHtml(game.id)}"><div class="game-graph-toolbar"><span class="game-graph-help">拖动空白处平移 · 滚轮缩放 · 拖动节点右侧 + 连线</span><div class="game-graph-toolbar-actions"><div class="game-graph-zoom-controls"><button type="button" class="ghost compact" data-game-zoom-out aria-label="缩小画布">−</button><span data-game-zoom-label>100%</span><button type="button" class="ghost compact" data-game-zoom-in aria-label="放大画布">＋</button><button type="button" class="ghost compact" data-game-fit>适应画布</button></div><button type="button" class="ghost compact" data-game-expand-canvas aria-label="全屏展开画布">⛶ 全屏画布</button><button type="button" class="ghost compact" data-game-add-edge>新增选项</button></div></div><div class="game-graph-viewport" data-game-graph-viewport><div class="game-graph" data-game-graph-stage data-game-graph-origin="${GRAPH_ORIGIN}" style="width:${width}px;height:${height}px"><svg class="game-edges" width="${width}" height="${height}" viewBox="-${GRAPH_ORIGIN} -${GRAPH_ORIGIN} ${width} ${height}" aria-hidden="true"><defs><marker id="game-edge-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"></path></marker></defs>${edgeLines}</svg>${labels}${cards}</div></div></div>`;
 }
 

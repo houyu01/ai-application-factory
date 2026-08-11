@@ -15,6 +15,32 @@ const STALE_GAME_TASK_STAGE: &str = "游戏生成工作线程已中断";
 const STALE_GAME_TASK_ERROR: &str = "生成工作线程已停止续租，任务已停止。请重试。";
 
 impl Repository {
+    /// Queue rich prompt decomposition for one game node before its video task is submitted.
+    pub fn enqueue_game_node_prompt(&self, game_id: &str, node_id: &str) -> AppResult<Value> {
+        self.get_game_node(game_id, node_id)?;
+        let task_id = self.db.with_connection(|connection| {
+            let active = connection.query_row(
+                "SELECT id FROM game_tasks WHERE game_id=?1 AND type='game_node_prompt' AND resource_id=?2 AND status=?3 ORDER BY created_at DESC LIMIT 1",
+                params![game_id, node_id, GENERATING],
+                |row| row.get::<_, String>(0),
+            ).optional()?;
+            if let Some(id) = active { return Ok(id); }
+            let version: String = connection.query_row(
+                "SELECT prompt_template_version FROM game_nodes WHERE id=?1 AND game_id=?2",
+                params![node_id, game_id],
+                |row| row.get(0),
+            )?;
+            let id = new_id();
+            let timestamp = now();
+            connection.execute(
+                "INSERT INTO game_tasks (id,game_id,type,resource_id,status,input_snapshot_json,progress,stage,created_at,started_at) VALUES (?1,?2,'game_node_prompt',?3,?4,?5,0,'等待生成节点提示词',?6,?6)",
+                params![id, game_id, node_id, GENERATING, json_text(&json!({"game_id":game_id,"node_id":node_id,"prompt_template_version":version})), timestamp],
+            )?;
+            Ok(id)
+        })?;
+        self.get_game_task(&task_id)
+    }
+
     /// Preserve the legacy focused title update while routing it through the workbench's full graph snapshot save.
     pub fn update_game_name(
         &self,

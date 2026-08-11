@@ -3,10 +3,15 @@
 mod assets;
 mod game_asset_images;
 mod game_covers;
+mod game_frame_references;
 mod game_generation_checkpoints;
 mod game_graph_validation;
+mod game_material_lookup;
 mod game_materials;
 mod game_placeholders;
+mod game_prompt;
+mod game_reference_images;
+mod game_regeneration;
 mod game_state;
 pub(crate) mod game_validation;
 mod game_video_history;
