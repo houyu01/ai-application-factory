@@ -1,41 +1,20 @@
-# AI Application Factory
-<img width="3022" height="1468" alt="image" src="https://github.com/user-attachments/assets/d2c989d2-c4d8-49ac-956a-47ca2866fee6" />
+# 客户端控制的短剧游戏平台
+兼容国内外各大云厂商的模型，可以混用(seedream的图片生成、wanxiang的视频生成)
+<img width="3014" height="1700" alt="image" src="https://github.com/user-attachments/assets/23ac1272-96f7-4972-9c93-90a7e9c5aefe" />
 
+## 轻松制作短剧
+超短脚本扩写，并自动分镜
 
-一个短剧和互动影视游戏创作的平台，一个兼容了阿里云、腾讯云、火山引擎多个引擎混用的创作平台底座，支持web/桌面端/ipad版
-
-## 当前迭代版本
-
-本项目当前以 **Tauri 桌面端** 为唯一持续迭代的产品实现：
-`frontend/` 负责 TypeScript 界面，`src-tauri/` 负责 Rust 本地服务、数据存储、任务与模型提供商调用。
-
-后续的功能开发、界面调整、问题修复和 AI 生成代码均在这套 Tauri 实现中完成。应用由 Rust 管理本地 SQLite、媒体和生成任务；迁移完成范围见 [Rust 迁移审计清单](docs/rust-migration-audit.md)。
-
-## iPad / App Store 打包
-
-工程已经初始化为通用 iOS 应用（同时支持 iPhone 与 iPad，iPad 使用 `arm64` 真机包）。首次打包只需配置本机的 Apple 签名信息：
-
-```bash
-cp .env.ios.example .env.ios
 ```
-
-在 `.env.ios` 中填写 `APPLE_DEVELOPMENT_TEAM`，值为 Apple Developer 网站 Membership 页面中的 10 位 Team ID。不要提交这个文件；它已被 Git 忽略。
-
-然后执行唯一的 App Store IPA 打包命令：
-
-```bash
-npm run build:ipad
+一个小说，主要是关于男主角从一个山村小伙子，成长为一代仙门大侠的故事，小时候男主角被灭满门，被青云山的道人收养，男主角在仙门内一路修炼成长，在门内小有所成之后，与其他仙门共同剿灭魔道，结识了魔道女少主，并与魔道女少主相爱，为正道所不容，但是最后通过与正道摩擦，发现了隐藏在正道内部的一个秘密，原来大boss就是正道魁首，男主与正道魁首多番较量，最终揭露他的真面目，最后男主带着魔道少主一起归隐山林
 ```
+<img width="2078" height="1626" alt="image" src="https://github.com/user-attachments/assets/e118d3ff-1bc5-484a-81d2-8378d99f47c0" />
 
-该命令运行 `tauri ios build --export-method app-store-connect`，IPA 产物位于 `src-tauri/gen/apple/build/arm64/`。当前 Bundle ID 是 `com.aiapplicationfactory.desktop`，在 Apple Developer 和 App Store Connect 创建 App ID / App 时必须完全一致；如需改为自己的反向域名，请先改 `src-tauri/tauri.conf.json` 的 `identifier`，再执行 `npx tauri ios init --ci --skip-targets-install` 重新生成 Xcode 工程。
+自动拆分短剧需要的素材
+<img width="1512" height="1668" alt="image" src="https://github.com/user-attachments/assets/ecdda242-8d7a-4a5c-9469-1c7798e8db27" />
 
-本机推荐使用 Xcode 自动签名：在 Xcode 的 Settings > Accounts 登录已加入 Apple Developer Program 的账户。Xcode 会管理 Apple Distribution 证书和 App Store Connect provisioning profile。自动签名用于 CI 时，在 `.env.ios` 中另填 `APPLE_API_ISSUER`、`APPLE_API_KEY` 和本机受保护的 `APPLE_API_KEY_PATH`；手动/CI 签名则填写 `IOS_CERTIFICATE`、`IOS_CERTIFICATE_PASSWORD`、`IOS_MOBILE_PROVISION` 三项 Base64 值。完整字段说明见 `.env.ios.example`。
+自动形成分镜与故事结构
+<img width="2494" height="1666" alt="image" src="https://github.com/user-attachments/assets/72d73022-c179-4ade-b2ae-799733d14678" />
 
-每次向 App Store Connect 上传新构建前，把 `src-tauri/tauri.ios.conf.json` 的 `bundle.iOS.bundleVersion` 递增为未上传过的整数；用户可见版本仍在 `src-tauri/tauri.conf.json` 的 `version` 中管理。
-
-<img width="2896" height="1452" alt="image" src="https://github.com/user-attachments/assets/ff38ffe8-cfe1-49fd-915f-c7787c12788d" />
-
-一句话生成并扩写10w字以上的剧本，剧本分镜全自动
-
-<img width="2894" height="1446" alt="image" src="https://github.com/user-attachments/assets/6b583650-6d26-4265-82c9-8add4ace7082" />
-素材自动生成
+支持多种云厂商配置、混用
+<img width="2512" height="982" alt="image" src="https://github.com/user-attachments/assets/3249ad06-a14e-423e-a7e2-8fa5590b2ab9" />
