@@ -1,0 +1,6 @@
+.home-model-configuration-notice {
+  color: #cf2f2f;
+  font-weight: 700;
+}
+
+:root[data-theme='dark'] .home-model-configuration-notice { color: #ff8787; }

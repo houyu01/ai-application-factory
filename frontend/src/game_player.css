@@ -1,0 +1,92 @@
+/* Generated-game player: reveal decisions inside the video after it completes. */
+
+.game-player-layout {
+  max-width: 1024px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.game-player-video-wrap { position: relative; }
+
+.game-player-restart {
+  background: #fff;
+  color: #141518;
+}
+
+.game-player-choice-panel {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  left: 24px;
+  max-height: 72%;
+  min-height: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  transition: opacity .35s ease, transform .35s ease;
+}
+
+.game-player-choice-panel:not(.is-visible) {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.game-player-choice-panel.is-visible {
+  animation: game-player-choices-enter .35s ease both;
+}
+
+.game-player-choice-panel[hidden] { display: none; }
+
+.game-player-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.game-player-choices.is-stacked { grid-template-columns: 1fr; }
+
+.game-player-choice {
+  display: block;
+  min-height: 58px;
+  border-color: #ffffff52;
+  background: #1011141c;
+  box-shadow: none;
+  color: #fff;
+  text-align: left;
+  text-shadow: 0 1px 3px #000b;
+}
+
+.game-player-choice:hover {
+  border-color: #ffffffa6;
+  background: #1011143d;
+}
+
+.game-player-choice-panel .game-player-ending { padding: 8px 0 0; }
+
+.game-player-debug-path {
+  margin: 0 4px;
+  color: #9aa0aa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.game-player-debug-path span { color: #d8dbe1; font-weight: 600; }
+
+@keyframes game-player-choices-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-player-choice-panel { transition: none; }
+  .game-player-choice-panel.is-visible { animation: none; opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+  .game-player-choice-panel { right: 16px; bottom: 16px; left: 16px; max-height: 82%; }
+  .game-player-choices { grid-template-columns: 1fr; }
+  .game-player-choice { min-height: 52px; padding: 10px; }
+}

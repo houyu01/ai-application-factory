@@ -1,6 +1,6 @@
 //! Resumable long-drama screenplay expansion before the existing decomposition task persists shots.
 
-use std::{thread, time::Duration};
+use std::thread;
 
 use serde_json::{json, Map, Value};
 
@@ -10,7 +10,7 @@ use crate::{
     value::GENERATING,
 };
 
-use super::DurableWorker;
+use super::{retry::immediate_language_retry_delay, DurableWorker};
 
 #[path = "worker_screenplay_stream.rs"]
 mod screenplay_stream;
@@ -67,20 +67,22 @@ impl DurableWorker {
         let selected_model = project["language_model"].as_str();
         if !self.providers.text_configured("language", selected_model)? {
             return Err(AppError::BadRequest(format!(
-                "未配置可调用的语言模型，无法执行包含 web_search 的 {episodes} 集长剧扩写。请先在配置页保存语言模型的 endpoint、API Key 和可选模型。"
+                "未配置可调用的语言模型，无法执行 {episodes} 集长剧扩写。请先在配置页保存语言模型的 endpoint、API Key 和可选模型。"
             )));
         }
         self.ensure_expansion_active(task_id)?;
         let mut snapshot = self.expansion_snapshot(task_id)?;
         let source_excerpt = source_excerpt(&source);
-        let enable_web = project["enable_web_search"].as_bool().unwrap_or(false);
+        let enable_web = crate::value::bool_value(&project["enable_web_search"]);
         let mut bible = snapshot_text(&snapshot, "story_bible");
         if bible.is_empty() {
-            let research = if enable_web {
-                self.research_frameworks(task_id, project, selected_model, &source_excerpt)?
-            } else {
-                String::new()
-            };
+            let research = self.research_frameworks(
+                task_id,
+                project,
+                selected_model,
+                &source_excerpt,
+                enable_web,
+            )?;
             self.repository.update_drama_task_progress(
                 task_id,
                 8,
@@ -201,7 +203,7 @@ impl DurableWorker {
         let selected_model = project["language_model"].as_str();
         let mut snapshot = self.expansion_snapshot(task_id)?;
         let source_excerpt = source_excerpt(&source);
-        let enable_web = project["enable_web_search"].as_bool().unwrap_or(false);
+        let enable_web = crate::value::bool_value(&project["enable_web_search"]);
         let mut bible = snapshot_text(&snapshot, "story_bible");
         if bible.is_empty() {
             bible = self.generate_story_bible(
@@ -310,7 +312,11 @@ impl DurableWorker {
         project: &Value,
         model: Option<&str>,
         source: &str,
+        web: bool,
     ) -> AppResult<String> {
+        if !web {
+            return Ok(String::new());
+        }
         let mut notes = Vec::new();
         for (index, topic) in RESEARCH_TOPICS.iter().enumerate() {
             self.ensure_expansion_active(task_id)?;
@@ -332,7 +338,7 @@ impl DurableWorker {
             let note = clean(&self.completion_retry(
                 model,
                 &prompt,
-                true,
+                web,
                 &format!("联网叙事框架研究：{topic}"),
             )?);
             if !note.is_empty() {
@@ -367,8 +373,11 @@ impl DurableWorker {
             {
                 Ok(Some(value)) => return Ok(value),
                 Ok(None) => return Err(AppError::BadRequest("未配置可调用的语言模型".to_owned())),
-                Err(error) if attempt < 3 && matches!(error, AppError::External(_)) => {
-                    thread::sleep(Duration::from_secs(1 << (attempt - 1)))
+                Err(error) if immediate_language_retry_delay(&error, attempt).is_some() => {
+                    thread::sleep(
+                        immediate_language_retry_delay(&error, attempt)
+                            .expect("retry delay was checked"),
+                    )
                 }
                 Err(error) => {
                     return Err(AppError::External(format!(

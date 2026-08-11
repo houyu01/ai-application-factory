@@ -64,6 +64,48 @@ impl Drop for DramaTaskLease {
     }
 }
 
+/// Keeps a claimed interactive-game expansion or graph task exclusive while its language call runs.
+pub(super) struct GameTaskLease {
+    stop: mpsc::Sender<()>,
+}
+
+impl GameTaskLease {
+    /// Begin renewing the game-task lease until the worker reaches a terminal task state.
+    pub(super) fn start(repository: Repository, task: &Value) -> Option<Self> {
+        let id = task["id"].as_str()?.to_owned();
+        let token = task["poll_lease_token"].as_str()?.to_owned();
+        if id.is_empty()
+            || token.is_empty()
+            || !repository
+                .renew_game_task_lease(&id, &token)
+                .unwrap_or(false)
+        {
+            return None;
+        }
+        let (stop, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            while matches!(
+                receiver.recv_timeout(LEASE_HEARTBEAT_INTERVAL),
+                Err(RecvTimeoutError::Timeout)
+            ) {
+                if !repository
+                    .renew_game_task_lease(&id, &token)
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+            }
+        });
+        Some(Self { stop })
+    }
+}
+
+impl Drop for GameTaskLease {
+    fn drop(&mut self) {
+        let _ = self.stop.send(());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, thread};

@@ -31,6 +31,30 @@ function isFailed(record: VideoHistoryRecord): boolean {
   return record.status === '生成失败';
 }
 
+async function selectVersionForExport(
+  options: VideoHistoryActionOptions,
+  shot: DramaShot,
+  record: VideoHistoryRecord,
+  button: HTMLButtonElement,
+) {
+  button.disabled = true;
+  try {
+    const response = await fetch(
+      `${options.apiBaseUrl}/projects/${encodeURIComponent(options.project!.id)}/shots/${encodeURIComponent(shot.id)}/versions/${encodeURIComponent(record.id)}/export-selection`,
+      { method: 'PUT' },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { detail?: string };
+      throw new Error(payload.detail || `HTTP ${response.status}`);
+    }
+    options.toast('已设为使用版本，打包下载时会默认选择它');
+    await options.loadDramaDetail(options.project!.id);
+  } catch (error) {
+    button.disabled = false;
+    options.toast(error instanceof Error ? error.message : '设置使用版本失败');
+  }
+}
+
 /** Match a history record to the video currently rendered in the preview panel. */
 function isSelectedRecord(options: VideoHistoryActionOptions, record: VideoHistoryRecord): boolean {
   if (!record.url) return false;
@@ -175,7 +199,16 @@ function createHistoryEntry(
     download.innerHTML = icon('download');
   }
   let refine: HTMLButtonElement | null = null;
+  let useVersion: HTMLButtonElement | null = null;
   if (record.url && record.status === '生成成功') {
+    useVersion = document.createElement('button');
+    useVersion.type = 'button';
+    useVersion.className = 'drama-history-use-version';
+    useVersion.disabled = Boolean(record.selectedForExport);
+    useVersion.title = record.selectedForExport ? '当前使用版本' : '设为使用版本';
+    useVersion.setAttribute('aria-label', useVersion.title);
+    useVersion.textContent = '✓';
+    useVersion.addEventListener('click', () => void selectVersionForExport(options, shot, record, useVersion!));
     refine = document.createElement('button');
     refine.type = 'button';
     refine.className = 'drama-history-refine';
@@ -200,10 +233,10 @@ function createHistoryEntry(
   remove.setAttribute('aria-label', remove.title);
   remove.innerHTML = icon('trash');
   if (record.id) remove.addEventListener('click', () => void deleteHistoryRecord(options, shot, record, remove));
-  if (refine && download) {
+  if (useVersion && refine && download) {
     const successActions = document.createElement('div');
     successActions.className = 'drama-history-success-actions';
-    successActions.append(remove, download, refine);
+    successActions.append(useVersion, refine, remove, download);
     actions.append(successActions);
   } else {
     if (download) actions.append(download);
@@ -216,7 +249,7 @@ function createHistoryEntry(
 function historySignature(shot: DramaShot, records: VideoHistoryRecord[]): string {
   return JSON.stringify({
     shotId: shot.id,
-    records: records.map(record => [record.id, record.status, record.url, record.error, record.progress, record.refinementPrompt, record.createdAt]),
+    records: records.map(record => [record.id, record.status, record.url, record.error, record.progress, record.refinementPrompt, record.selectedForExport, record.createdAt]),
   });
 }
 

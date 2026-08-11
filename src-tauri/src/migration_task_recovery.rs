@@ -14,6 +14,8 @@ const INTERRUPTED_STAGE: &str = "应用重启后任务中断";
 const INTERRUPTED_ERROR: &str = "应用重启后无法恢复此任务，请重试。";
 const VIDEO_RETRY_STAGE: &str = "应用重启后无法恢复视频任务";
 const VIDEO_RETRY_ERROR: &str = "应用重启前未保存远端视频任务，无法继续查询，请重试生成。";
+const GAME_INTERRUPTED_STAGE: &str = "应用重启后游戏生成中断";
+const GAME_INTERRUPTED_ERROR: &str = "应用重启后无法恢复互动游戏生成，请重试。";
 
 /// Reconcile durable work on desktop startup: remote video jobs resume polling, while interrupted local work becomes retryable.
 pub(crate) fn recover_interrupted_generation_tasks(connection: &Connection) -> AppResult<()> {
@@ -24,6 +26,22 @@ pub(crate) fn recover_interrupted_generation_tasks(connection: &Connection) -> A
     mark_interrupted_assets_failed(connection, &timestamp)?;
     mark_interrupted_variants_failed(connection)?;
     mark_interrupted_screenplays_failed(connection, &timestamp)?;
+    mark_interrupted_game_generation_failed(connection, &timestamp)?;
+    Ok(())
+}
+
+fn mark_interrupted_game_generation_failed(
+    connection: &Connection,
+    timestamp: &str,
+) -> AppResult<()> {
+    connection.execute(
+        "UPDATE game_tasks SET status=?1,stage=?2,error_message=?3,progress=100,completed_at=?4,poll_lease_token=NULL,poll_lease_until=NULL WHERE status=?5 AND type IN ('game_script_expansion','game_graph_decomposition')",
+        params![FAILED, GAME_INTERRUPTED_STAGE, GAME_INTERRUPTED_ERROR, timestamp, GENERATING],
+    )?;
+    connection.execute(
+        "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id IN (SELECT game_id FROM game_tasks WHERE status=?1 AND stage=?3 AND completed_at=?2)",
+        params![FAILED, timestamp, GAME_INTERRUPTED_STAGE],
+    )?;
     Ok(())
 }
 

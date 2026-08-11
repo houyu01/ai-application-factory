@@ -16,6 +16,18 @@ use crate::{
 
 #[path = "service_cover.rs"]
 mod cover;
+#[path = "service_game_cover.rs"]
+mod game_cover;
+#[path = "service_game_placeholder.rs"]
+mod game_placeholder;
+#[path = "service_game_video.rs"]
+mod game_video;
+#[path = "service_game_video_batch.rs"]
+mod game_video_batch;
+#[path = "service_game_video_cancellation.rs"]
+mod game_video_cancellation;
+#[path = "service_game_video_history.rs"]
+mod game_video_history;
 #[path = "service_placeholder.rs"]
 mod placeholder;
 #[path = "service_reference_images.rs"]
@@ -26,6 +38,8 @@ mod restart;
 mod screenplay;
 #[path = "service_serial_video_batch.rs"]
 mod serial_video_batch;
+#[path = "service_video_export.rs"]
+mod video_export;
 #[path = "service_video_refinement.rs"]
 mod video_refinement;
 #[path = "service_video_snapshot.rs"]

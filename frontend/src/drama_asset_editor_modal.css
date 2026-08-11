@@ -1,0 +1,52 @@
+/* Full-width material editor shared by character, scene, and prop dialogs. */
+.drama-asset-editor-modal{
+  display:flex;
+  flex-direction:column;
+  width:min(1180px,calc(100vw - 40px));
+  max-height:calc(100vh - 48px);
+  padding:0;
+  overflow:hidden;
+}
+
+.drama-asset-editor-modal>.modal-head{
+  flex:0 0 auto;
+  padding:36px 78px 24px;
+}
+
+.drama-asset-editor-modal>label{
+  flex:0 0 auto;
+  margin:18px 78px 0;
+  font-size:16px;
+}
+
+.drama-asset-editor-modal>label:last-of-type{
+  min-height:0;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  margin-bottom:28px;
+}
+
+.drama-asset-editor-modal input,
+.drama-asset-editor-modal select,
+.drama-asset-editor-modal textarea{
+  font-size:16px;
+}
+
+.drama-asset-editor-modal textarea{
+  flex:1 1 280px;
+  min-height:220px;
+}
+
+.drama-asset-editor-modal>.modal-actions{
+  flex:0 0 auto;
+  margin:0;
+  padding:22px 78px 28px;
+}
+
+@media(max-width:760px){
+  .drama-asset-editor-modal{max-height:calc(100vh - 24px);width:calc(100vw - 24px)}
+  .drama-asset-editor-modal>.modal-head{padding:28px 28px 20px}
+  .drama-asset-editor-modal>label{margin-left:28px;margin-right:28px}
+  .drama-asset-editor-modal>.modal-actions{padding-left:28px;padding-right:28px}
+}

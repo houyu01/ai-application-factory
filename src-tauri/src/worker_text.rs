@@ -16,7 +16,11 @@ impl DurableWorker {
         self.repository
             .update_drama_task_progress(id, 65, "正在拆解扩写剧本")?;
         let mut plan = self.long_form_plan(id, &raw, &screenplay)?;
-        super::decomposition_assets::enrich(&mut plan, raw["theme"].as_str().unwrap_or("都市"));
+        super::decomposition_assets::enrich(
+            &mut plan,
+            raw["theme"].as_str().unwrap_or("都市"),
+            raw["style"].as_str().unwrap_or("真人风格"),
+        );
         self.repository
             .update_drama_task_progress(id, 75, "正在整理分集、分镜和素材")?;
         self.ensure_expansion_active(id)?;
@@ -65,13 +69,15 @@ impl DurableWorker {
             .as_ref()
             .and_then(|item| item["template_text"].as_str())
             .unwrap_or("返回可编辑分镜富提示词 JSON。");
+        let enable_web_search = crate::value::bool_value(&project["enable_web_search"]);
         let mut nodes = self
             .providers
-            .complete(
+            .complete_with_web_search(
                 "language",
                 project["language_model"].as_str(),
                 system,
                 &rich_prompt_request(&project, &shot, &references, version),
+                enable_web_search,
             )?
             .and_then(|response| planner::model_rich_prompt(&response, &references))
             .unwrap_or_else(|| planner::fallback_rich_prompt(&project, &shot, &references));

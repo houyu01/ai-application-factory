@@ -2,7 +2,7 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::value::json_field;
+use crate::value::{bool_value, ground_game_video_prompt, json_field};
 
 fn move_json(object: &mut Map<String, Value>, public: &str, stored: &str, default: Value) {
     let value = json_field(object, stored, default);
@@ -13,6 +13,8 @@ fn move_json(object: &mut Map<String, Value>, public: &str, stored: &str, defaul
 pub fn drama(mut row: Value) -> Value {
     let object = row.as_object_mut().expect("database rows are objects");
     object.remove("expanded_script");
+    let enable_web_search = bool_value(object.get("enable_web_search").unwrap_or(&Value::Null));
+    object.insert("enable_web_search".to_owned(), json!(enable_web_search));
     move_json(object, "shots", "shots_json", json!([]));
     move_json(object, "assets", "assets_json", json!([]));
     move_json(
@@ -189,15 +191,47 @@ pub fn game_task(mut row: Value) -> Value {
     row
 }
 
-/// Game asset projection currently has no JSON columns but keeps a single mapping boundary.
-pub fn game_asset(row: Value) -> Value {
+/// Game asset projection restores image history and alternative forms for the material workbench.
+pub fn game_asset(mut row: Value) -> Value {
+    let object = row.as_object_mut().expect("database rows are objects");
+    move_json(object, "image_history", "image_history_json", json!([]));
+    move_json(object, "variants", "variants_json", json!([]));
+    move_json(object, "metadata", "metadata_json", json!({}));
     row
 }
 
-/// Game node projection restores persisted video history for the graph editor.
+/// Game node projection restores persisted video history and all saved video-reference controls for the graph editor.
 pub fn game_node(mut row: Value) -> Value {
     let object = row.as_object_mut().expect("database rows are objects");
+    if let (Some(prompt), Some(original_text)) = (
+        object.get("prompt").and_then(Value::as_str),
+        object.get("original_text").and_then(Value::as_str),
+    ) {
+        object.insert(
+            "prompt".to_owned(),
+            json!(ground_game_video_prompt(prompt, original_text)),
+        );
+    }
+    move_json(object, "prompt_rich", "prompt_rich_json", json!([]));
     move_json(object, "video_history", "video_history_json", json!([]));
+    move_json(
+        object,
+        "reference_asset_ids",
+        "reference_asset_ids_json",
+        json!([]),
+    );
+    move_json(
+        object,
+        "first_last_frames",
+        "first_last_frames_json",
+        json!({}),
+    );
+    move_json(
+        object,
+        "placeholder_placements",
+        "placeholder_placements_json",
+        json!([]),
+    );
     row
 }
 

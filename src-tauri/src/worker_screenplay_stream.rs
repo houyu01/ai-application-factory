@@ -12,6 +12,7 @@ use crate::{
     skills,
 };
 
+use super::super::retry::immediate_language_retry_delay;
 use super::{
     support::{char_count, expansion_progress, join_screenplay},
     DurableWorker,
@@ -80,8 +81,19 @@ impl DurableWorker {
             match response {
                 Ok(Some(value)) => return Ok(value),
                 Ok(None) => return Err(AppError::BadRequest("未配置可调用的语言模型".to_owned())),
-                Err(error) if attempt < 3 && matches!(error, AppError::External(_)) => {
-                    thread::sleep(Duration::from_secs(1 << (attempt - 1)));
+                Err(error) if immediate_language_retry_delay(&error, attempt).is_some() => {
+                    let delay = immediate_language_retry_delay(&error, attempt)
+                        .expect("retry delay was checked");
+                    self.repository.update_drama_task_progress(
+                        task_id,
+                        expansion_progress(char_count(completed_screenplay), target_chars),
+                        &format!(
+                            "{stage}连接短暂异常，{} 秒后立即重试（{}/3）",
+                            delay.as_secs(),
+                            attempt + 1
+                        ),
+                    )?;
+                    thread::sleep(delay);
                 }
                 Err(error) => {
                     return Err(AppError::External(format!(

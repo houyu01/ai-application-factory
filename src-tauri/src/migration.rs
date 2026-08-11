@@ -2,7 +2,11 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::{error::AppResult, value::now};
+use crate::{
+    error::AppResult,
+    value::now,
+    volcengine_tts::{apply_seed_tts_two_defaults, migrate_legacy_async_profile},
+};
 
 #[path = "migration_task_recovery.rs"]
 mod task_recovery;
@@ -48,9 +52,12 @@ pub(crate) fn migrate_legacy_schema(connection: &Connection) -> AppResult<()> {
             ("refinement_source_version_id", "TEXT"),
             ("source_video_url", "TEXT"),
             ("refinement_prompt", "TEXT NOT NULL DEFAULT ''"),
+            // One completed video per shot can be selected as the default ZIP-export source.
+            ("is_selected_for_export", "INTEGER NOT NULL DEFAULT 0"),
         ],
     )?;
     migrate_refinement_prompt_ownership(connection)?;
+    migrate_legacy_ark_tts_settings(connection)?;
     add_missing_columns(
         connection,
         "short_dramas",
@@ -94,7 +101,54 @@ pub(crate) fn migrate_legacy_schema(connection: &Connection) -> AppResult<()> {
     add_missing_columns(
         connection,
         "interactive_games",
-        &[("video_model", "TEXT NOT NULL DEFAULT 'doubao-seedance-2.0'")],
+        &[
+            ("video_model", "TEXT NOT NULL DEFAULT 'doubao-seedance-2.0'"),
+            ("expanded_script", "TEXT NOT NULL DEFAULT ''"),
+            ("resolution", "TEXT NOT NULL DEFAULT '720p'"),
+            ("enable_web_search", "INTEGER NOT NULL DEFAULT 0"),
+            ("expanded_script_min_chars", "INTEGER NOT NULL DEFAULT 5000"),
+            (
+                "expanded_script_max_chars",
+                "INTEGER NOT NULL DEFAULT 10000",
+            ),
+            ("node_script_max_chars", "INTEGER NOT NULL DEFAULT 400"),
+            ("asset_public_prompts_json", "TEXT NOT NULL DEFAULT '{}'"),
+        ],
+    )?;
+    // Interactive-game assets share the same durable image history and alternative-form boundary as short-drama assets.
+    add_missing_columns(
+        connection,
+        "game_assets",
+        &[
+            ("image_history_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("variants_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("metadata_json", "TEXT NOT NULL DEFAULT '{}'"),
+            // Character materials can select a catalog voice used as a video audio reference.
+            ("voice_id", "TEXT"),
+        ],
+    )?;
+    add_missing_columns(connection, "voice_presets", &[("audio_url", "TEXT")])?;
+    add_missing_columns(
+        connection,
+        "game_nodes",
+        &[
+            ("prompt_rich_json", "TEXT NOT NULL DEFAULT '[]'"),
+            // Keeps the short-drama-compatible multi-shot / long-shot prompt choice per game node.
+            ("prompt_template_version", "TEXT NOT NULL DEFAULT 'v1'"),
+            ("reference_asset_ids_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("first_last_frames_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("placeholder_asset_id", "TEXT"),
+            ("placeholder_scene_asset_id", "TEXT"),
+            ("placeholder_placements_json", "TEXT NOT NULL DEFAULT '[]'"),
+            // Completed history ID chosen by the creator for the editor and playable runtime.
+            ("selected_video_id", "TEXT"),
+        ],
+    )?;
+    // Runtime sessions retain early-choice flags after paths merge into a shared video node.
+    add_missing_columns(
+        connection,
+        "game_sessions",
+        &[("state_json", "TEXT NOT NULL DEFAULT '{}'")],
     )?;
     add_missing_columns(
         connection,
@@ -106,11 +160,85 @@ pub(crate) fn migrate_legacy_schema(connection: &Connection) -> AppResult<()> {
             ("poll_lease_token", "TEXT"),
             ("poll_lease_until", "TEXT"),
             ("next_poll_at", "TEXT"),
+            ("provider_task_id", "TEXT"),
         ],
     )?;
+    migrate_game_video_duration_range(connection)?;
     task_recovery::recover_interrupted_generation_tasks(connection)?;
+    // Voice previews use a synchronous configured TTS call; restart returns any orphaned local lease to its queue.
+    connection.execute(
+        "UPDATE voice_generation_tasks SET stage='等待生成音色',progress=0 WHERE status='生成中' AND stage='正在生成音色'",
+        [],
+    )?;
     recover_unclaimed_task_queue_states(connection)?;
     fold_legacy_episodes(connection)
+}
+
+/// Upgrade persisted audio profiles from the retired `/api/v1/tts_async` protocol to Seed-TTS 2.0.
+fn migrate_legacy_ark_tts_settings(connection: &Connection) -> AppResult<()> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS desktop_schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
+    )?;
+    let applied = connection
+        .query_row(
+            "SELECT 1 FROM desktop_schema_migrations WHERE id='seed_tts_2_v2'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if applied {
+        return Ok(());
+    }
+    let value = connection
+        .query_row(
+            "SELECT value_json FROM app_settings WHERE key='audio'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(value) = value else {
+        connection.execute(
+            "INSERT INTO desktop_schema_migrations (id,applied_at) VALUES ('seed_tts_2_v2',?1)",
+            [now()],
+        )?;
+        return Ok(());
+    };
+    let mut value = serde_json::from_str::<serde_json::Value>(&value).unwrap_or_default();
+    let mut changed = false;
+    if let Some(audio) = value.as_object_mut() {
+        if audio.get("provider").and_then(serde_json::Value::as_str) == Some("ark") {
+            if !migrate_legacy_async_profile(audio) {
+                apply_seed_tts_two_defaults(audio);
+            }
+            changed = true;
+        }
+        if let Some(profiles) = audio
+            .get_mut("provider_profiles")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            if let Some(ark) = profiles
+                .get_mut("ark")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                if !migrate_legacy_async_profile(ark) {
+                    apply_seed_tts_two_defaults(ark);
+                }
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        connection.execute(
+            "UPDATE app_settings SET value_json=?1,updated_at=?2 WHERE key='audio'",
+            [value.to_string(), now()],
+        )?;
+    }
+    connection.execute(
+        "INSERT INTO desktop_schema_migrations (id,applied_at) VALUES ('seed_tts_2_v2',?1)",
+        [now()],
+    )?;
+    Ok(())
 }
 
 /// Clear abandoned local leases so an application restart resumes the durable task queue.
@@ -145,6 +273,46 @@ fn migrate_refinement_prompt_ownership(connection: &Connection) -> AppResult<()>
     connection.execute(
         "INSERT INTO desktop_schema_migrations (id,applied_at) VALUES ('refinement_prompt_ownership_v1',?1)",
         [now()],
+    )?;
+    Ok(())
+}
+
+/// Repair early interactive-game nodes that allowed 3-second or over-15-second videos.
+///
+/// The persisted values are read when a durable node task is submitted. Normalizing both the
+/// project defaults and existing nodes keeps resumed tasks within Ark Seedance 2.0's 4–15 second
+/// request range without changing any prompt, reference, or completed video.
+fn migrate_game_video_duration_range(connection: &Connection) -> AppResult<()> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS desktop_schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)",
+    )?;
+    let applied = connection
+        .query_row(
+            "SELECT 1 FROM desktop_schema_migrations WHERE id='game_video_duration_range_v1'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some();
+    if applied {
+        return Ok(());
+    }
+    let timestamp = now();
+    connection.execute(
+        "UPDATE interactive_games SET node_duration_min=MIN(15,MAX(4,node_duration_min)),node_duration_max=MIN(15,MAX(4,node_duration_max)),updated_at=?1",
+        [&timestamp],
+    )?;
+    connection.execute(
+        "UPDATE interactive_games SET node_duration_max=node_duration_min,updated_at=?1 WHERE node_duration_max<node_duration_min",
+        [&timestamp],
+    )?;
+    connection.execute(
+        "UPDATE game_nodes SET duration_seconds=MIN(15,MAX(4,duration_seconds)),updated_at=?1",
+        [&timestamp],
+    )?;
+    connection.execute(
+        "INSERT INTO desktop_schema_migrations (id,applied_at) VALUES ('game_video_duration_range_v1',?1)",
+        [&timestamp],
     )?;
     Ok(())
 }

@@ -58,6 +58,14 @@ fn dispatch(service: &DesktopService, request: &ApiRequest) -> AppResult<(u16, V
             .and_then(|value| object(value.unwrap_or_else(|| json!({}))))
     };
     let method = request.method.to_uppercase();
+    if let Some(response) = crate::api_game_routes::handle_game_route(
+        service,
+        &method,
+        parts.as_slice(),
+        request.body.as_deref(),
+    )? {
+        return Ok(response);
+    }
     let task_status = if url.query_pairs().any(|(key, _)| key == "status") {
         query(&url, "status")
     } else {
@@ -184,6 +192,21 @@ fn dispatch(service: &DesktopService, request: &ApiRequest) -> AppResult<(u16, V
             let tasks = service.enqueue_shot_videos(id, shot, count)?;
             Ok((202, json!({"requested_count":count,"tasks":tasks})))
         }
+        ("PUT", ["projects", id, "shots", shot, "versions", version, "export-selection"]) => Ok((
+            200,
+            service
+                .repository
+                .select_shot_version_for_export(id, shot, version)?,
+        )),
+        ("POST", ["projects", id, "video-exports"]) => {
+            Ok((202, service.enqueue_video_export(id, body()?)?))
+        }
+        ("GET", ["projects", id, "video-exports", task]) => {
+            Ok((200, service.video_export_task(id, task)?))
+        }
+        ("POST", ["projects", id, "video-exports", task, "cancel"]) => {
+            Ok((202, service.cancel_video_export(id, task)?))
+        }
         ("POST", ["projects", id, "videos", "serial"]) => {
             Ok((202, service.start_serial_shot_video_batch(id)?))
         }
@@ -288,53 +311,21 @@ fn dispatch(service: &DesktopService, request: &ApiRequest) -> AppResult<(u16, V
         ("POST", ["settings", "voices"]) => {
             Ok((201, service.repository.create_voice_preset(body()?)?))
         }
+        // A source-audio request is durable before the configured audio model is invoked by the worker.
+        ("POST", ["settings", "voice-audio-tasks"]) => {
+            Ok((202, service.repository.create_voice_audio_task(body()?)?))
+        }
+        ("GET", ["settings", "voice-audio-tasks", task]) => {
+            Ok((200, service.repository.get_voice_audio_task(task)?))
+        }
+        ("POST", ["settings", "voice-audio-tasks", task, "regenerate"]) => {
+            Ok((202, service.repository.regenerate_voice_audio_task(task)?))
+        }
+        ("POST", ["settings", "voice-audio-tasks", task, "confirm"]) => {
+            Ok((201, service.repository.confirm_voice_audio_preview(task)?))
+        }
         ("GET", ["settings", "storage"]) => Ok((200, service.repository.storage_config()?)),
         ("PUT", ["settings", "storage"]) => Ok((200, service.save_storage(body()?)?)),
-        ("GET", ["games"]) => Ok((200, json!(service.repository.list_games()?))),
-        ("POST", ["games"]) => Ok((202, service.repository.create_game(body()?)?)),
-        ("GET", ["games", id]) => Ok((200, service.repository.get_game(id)?)),
-        ("DELETE", ["games", id]) => Ok((200, service.delete_game(id)?)),
-        ("PUT", ["games", id, "models"]) => {
-            Ok((200, service.repository.update_game_models(id, body()?)?))
-        }
-        ("GET", ["games", id, "runtime-manifest"]) => {
-            crate::api_game_routes::game_manifest(service, id)
-        }
-        ("POST", ["games", id, "sessions"]) => {
-            Ok((201, service.repository.create_game_session(id)?))
-        }
-        ("GET", ["games", id, "sessions", session]) => {
-            Ok((200, service.repository.get_game_session(id, session)?))
-        }
-        ("POST", ["games", id, "sessions", session, "choices"]) => {
-            let values = body()?;
-            let edge = values
-                .get("edge_id")
-                .and_then(Value::as_str)
-                .ok_or_else(|| AppError::BadRequest("缺少 edge_id".to_owned()))?
-                .to_owned();
-            Ok((
-                200,
-                service.repository.choose_game_edge(id, session, &edge)?,
-            ))
-        }
-        ("POST", ["games", id, "nodes", node, "video"]) => {
-            Ok((202, service.repository.enqueue_game_node_video(id, node)?))
-        }
-        ("PUT", ["games", id, "nodes", node]) => {
-            Ok((200, service.repository.update_game_node(id, node, body()?)?))
-        }
-        ("POST", ["games", id, "edges"]) => {
-            Ok((200, service.repository.create_game_edge(id, body()?)?))
-        }
-        ("PUT", ["games", id, "edges", edge]) => {
-            Ok((200, service.repository.update_game_edge(id, edge, body()?)?))
-        }
-        ("DELETE", ["games", id, "edges", edge]) => {
-            service.repository.delete_game_edge(id, edge)?;
-            Ok((204, Value::Null))
-        }
-        ("GET", ["game-tasks", task]) => Ok((200, service.repository.get_game_task(task)?)),
         _ => Err(AppError::NotFound(format!(
             "未找到本地 API：{} {}",
             request.method,

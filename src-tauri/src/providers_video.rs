@@ -8,11 +8,14 @@ use crate::{
     providers::{model_for, ProviderClient, VideoJob},
 };
 
+#[path = "providers_video_audio_references.rs"]
+mod video_audio_references;
 #[path = "providers_video_prompt.rs"]
 mod video_prompt;
 #[path = "providers_video_state.rs"]
 mod video_state;
 
+use video_audio_references::{ark_content, supports_ark_reference_audio, unique_reference_audio};
 use video_prompt::{dashscope_prompt, dashscope_reference_limit, dashscope_reference_mode};
 use video_state::{
     api_key, progress, task_error, task_id, task_status, task_url, unique, video_json_response,
@@ -28,6 +31,7 @@ impl ProviderClient {
         resolution: &str,
         seconds: i64,
         reference_images: &[String],
+        reference_audio: &[Option<String>],
         reference_video: Option<&str>,
         selected_model: Option<&str>,
     ) -> AppResult<VideoJob> {
@@ -39,6 +43,7 @@ impl ProviderClient {
             resolution,
             seconds,
             reference_images,
+            reference_audio,
             reference_video,
             selected_model,
         )
@@ -53,6 +58,7 @@ impl ProviderClient {
         resolution: &str,
         seconds: i64,
         reference_images: &[String],
+        reference_audio: &[Option<String>],
         reference_video: Option<&str>,
         selected_model: Option<&str>,
     ) -> AppResult<VideoJob> {
@@ -73,6 +79,7 @@ impl ProviderClient {
                 resolution,
                 seconds,
                 reference_images,
+                reference_audio,
                 reference_video,
             ),
             "tencent" => self.start_tencent(
@@ -83,6 +90,7 @@ impl ProviderClient {
                 resolution,
                 seconds,
                 reference_images,
+                reference_audio,
                 reference_video,
             ),
             _ => self.start_ark(
@@ -93,6 +101,7 @@ impl ProviderClient {
                 resolution,
                 seconds,
                 reference_images,
+                reference_audio,
                 reference_video,
             ),
         }
@@ -218,6 +227,7 @@ impl ProviderClient {
         resolution: &str,
         seconds: i64,
         references: &[String],
+        reference_audio: &[Option<String>],
         reference_video: Option<&str>,
     ) -> AppResult<VideoJob> {
         let key = api_key(config)?;
@@ -227,7 +237,13 @@ impl ProviderClient {
             .filter(|value| !value.is_empty())
             .or_else(|| config.get("endpoint").and_then(Value::as_str))
             .ok_or_else(|| AppError::BadRequest("视频模型尚未配置创建地址".to_owned()))?;
-        let content = ark_content(prompt, references, reference_video);
+        let content = ark_content(
+            prompt,
+            references,
+            reference_audio,
+            reference_video,
+            supports_ark_reference_audio(model),
+        );
         let response = video_json_response(
             "Ark",
             self.client
@@ -249,10 +265,12 @@ impl ProviderClient {
         resolution: &str,
         seconds: i64,
         references: &[String],
+        reference_audio: &[Option<String>],
         reference_video: Option<&str>,
     ) -> AppResult<VideoJob> {
         let key = api_key(config)?;
         let images = unique(references);
+        let voice_by_image = unique_reference_audio(references, reference_audio);
         let model_lower = model.to_lowercase();
         if let Some(video) = reference_video.filter(|value| !value.is_empty()) {
             if !dashscope_reference_mode(&model_lower) {
@@ -285,7 +303,23 @@ impl ProviderClient {
         let input = if images.is_empty() {
             json!({"prompt":prompt})
         } else {
-            json!({"prompt":dashscope_prompt(prompt, model),"media":images.into_iter().map(|url| json!({"type":"reference_image","url":url})).collect::<Vec<_>>()})
+            let can_reference_voice = model_lower.starts_with("wan2.7-r2v");
+            let media = images
+                .into_iter()
+                .enumerate()
+                .map(|(index, url)| {
+                    let mut item = json!({"type":"reference_image","url":url});
+                    if can_reference_voice {
+                        if let Some(audio) =
+                            voice_by_image.get(index).and_then(|value| value.as_ref())
+                        {
+                            item["reference_voice"] = json!(audio);
+                        }
+                    }
+                    item
+                })
+                .collect::<Vec<_>>();
+            json!({"prompt":dashscope_prompt(prompt, model),"media":media})
         };
         let mut parameters =
             json!({"resolution":resolution.to_uppercase(),"duration":seconds,"audio":true});
@@ -358,7 +392,10 @@ impl ProviderClient {
 
     pub(super) fn read_submission(&self, response: &Value, provider: &str) -> AppResult<VideoJob> {
         if let Some(url) = video_url(response) {
-            return self.media.save_url(url, ".mp4").map(VideoJob::Ready);
+            return self
+                .media
+                .save_generated_video_url(url)
+                .map(VideoJob::Ready);
         }
         let id = task_id(response).ok_or_else(|| {
             video_task_response_error(provider, "视频模型没有返回任务 ID", response)
@@ -385,7 +422,7 @@ impl ProviderClient {
                         response,
                     )
                 })
-                .and_then(|url| self.media.save_url(url, ".mp4"))
+                .and_then(|url| self.media.save_generated_video_url(url))
                 .map(VideoJob::Ready);
         }
         if ["failed", "fail", "canceled", "cancelled", "error"].contains(&status.as_str()) {
@@ -402,45 +439,11 @@ impl ProviderClient {
     }
 }
 
-fn ark_content(prompt: &str, references: &[String], reference_video: Option<&str>) -> Vec<Value> {
-    let mut content = vec![json!({"type":"text","text":prompt})];
-    if let Some(video) = reference_video.filter(|value| !value.is_empty()) {
-        content
-            .push(json!({"type":"video_url","video_url":{"url":video},"role":"reference_video"}));
-    }
-    for image in unique(references) {
-        content
-            .push(json!({"type":"image_url","image_url":{"url":image},"role":"reference_image"}));
-    }
-    content
-}
-
 fn dashscope_size(ratio: &str, resolution: &str) -> &'static str {
     match (ratio, resolution.to_lowercase().as_str()) {
         ("9:16", "480p") => "480*832",
         ("16:9", "480p") => "854*480",
         ("9:16", _) => "720*1280",
         _ => "1280*720",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ark_content;
-
-    #[test]
-    fn ark_refinement_request_carries_the_source_video_and_images() {
-        let content = ark_content(
-            "微调提示",
-            &["https://example.com/reference.png".to_owned()],
-            Some("https://example.com/source.mp4"),
-        );
-
-        assert_eq!(content[1]["type"], "video_url");
-        assert_eq!(
-            content[1]["video_url"]["url"],
-            "https://example.com/source.mp4"
-        );
-        assert_eq!(content[2]["role"], "reference_image");
     }
 }

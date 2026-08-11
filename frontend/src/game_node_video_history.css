@@ -1,0 +1,35 @@
+/* Durable game-node video version cards mirror short-drama preview and history actions. */
+
+.game-node-video-history { margin-top: 14px; overflow: hidden; }
+.game-node-video-history-head { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 8px; color: #8b8d92; font-size: 11px; text-align: right; }
+.game-node-video-history-head h4 { margin: 0; color: inherit; font-size: 12px; }
+.game-node-history-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: thin; }
+.game-node-history-entry { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; flex: 0 0 min(100%, 270px); align-items: center; min-width: 220px; min-height: 60px; gap: 8px; padding: 8px; border: 1px solid #e4e4e1; border-radius: 10px; background: #fff; }
+.game-node-history-entry.is-selected { outline: 2px solid #e99137; outline-offset: -2px; }
+.game-node-history-preview { display: grid; width: 44px; height: 44px; place-items: center; overflow: hidden; padding: 0; border: 0; border-radius: 7px; background: #f3f3f0; color: #6f7176; }
+button.game-node-history-preview { cursor: pointer; }
+.game-node-history-preview video { width: 100%; height: 100%; object-fit: cover; }
+.game-node-history-preview .generation-spinner { width: 18px; height: 18px; }
+.game-node-history-failed-icon { display: grid; width: 100%; height: 100%; place-items: center; background: #fff0ed; color: #cf5d45; font-size: 18px; font-weight: 600; }
+.game-node-history-details { min-width: 0; }
+.game-node-history-details strong, .game-node-history-details small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.game-node-history-details strong { font-size: 13px; font-weight: 500; }
+.game-node-history-details .status { display: inline-flex; margin-top: 3px; font-size: 10px; }
+.game-node-history-details small { margin-top: 4px; color: #8d9095; font-size: 10px; }
+.game-node-history-actions { display: flex; align-items: center; gap: 2px; align-self: start; }
+.game-node-history-actions :is(button, a) { display: inline-grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #6f7176; text-decoration: none; }
+.game-node-history-actions :is(button, a):hover { background: #f1f1ef; color: #17181b; }
+.game-node-history-actions .game-node-history-delete, .game-node-history-actions .game-node-history-error { color: #cf5d45; }
+.game-node-history-actions .game-node-history-use-version { color: #85878d; }
+.game-node-history-actions .game-node-history-use-version:disabled { cursor: default; background: #e9f8ef; color: #16945b; opacity: 1; }
+.game-node-history-actions .ui-icon { width: 15px; height: 15px; }
+.game-node-video-history-empty { width: 100%; margin: 0; padding: 14px 10px; border: 1px dashed #dededb; border-radius: 8px; color: #92959a; font-size: 11px; }
+.game-node-video-refinement-modal { width: min(510px, calc(100vw - 32px)); }
+.game-node-video-refinement-preview { display: block; width: 100%; max-height: 300px; margin: 14px 0; border-radius: 9px; background: #151619; }
+.game-node-video-refinement-field { display: block; text-align: left; }
+.game-node-video-refinement-field > span { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 600; }
+.game-node-video-refinement-field textarea { width: 100%; box-sizing: border-box; resize: vertical; }
+:root[data-theme='dark'] .game-node-history-entry { border-color: #34373d; background: #181a1e; }
+:root[data-theme='dark'] .game-node-history-preview { background: #272a30; color: #bec2ca; }
+:root[data-theme='dark'] .game-node-history-actions :is(button, a):hover { background: #2b2e34; color: #fff; }
+:root[data-theme='dark'] .game-node-history-actions .game-node-history-use-version:disabled { background: #163326; color: #7bd5a4; }

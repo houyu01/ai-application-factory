@@ -2,7 +2,7 @@
 import type { ApiProject, DramaAsset, DramaAssetImageHistory, DramaAssetKind, DramaAssetMetadata, DramaAssetVariant, DramaPlacement, DramaPromptAssetType, DramaPromptNode, DramaShot, GenerationTask, Project, VoicePreset } from './models.js';
 import { dramaAssetImageIsGenerating, dramaImageLoadingMarkup } from './drama_asset_image_state_ui.js';
 import { dramaReferenceAsset, dramaReferenceKey, dramaReferenceOptions } from './drama_reference_asset.js';
-import './drama_image_viewer.js'; import { suppressExistingModelTaskFailureNotifications } from './model_task_failure_toast.js';
+import './drama_image_viewer.js'; import './drama_asset_editor_modal.css'; import { suppressExistingModelTaskFailureNotifications } from './model_task_failure_toast.js';
 import { scheduleDramaTaskRefresh as pollDramaTasks } from './drama_task_polling.js';
 import { syncDramaVideoGenerationInfo } from './drama_video_failure_ui.js';
 import { refreshDramaVideoCancellation } from './drama_video_cancellation_ui.js';
@@ -329,7 +329,7 @@ export function openDramaAssetEditorModal(project: ApiProject, kind: DramaAssetK
       void rt().loadDramaDetail(project.id);
     } catch (error) { if (button) { button.disabled = false; button.textContent = editing ? '保存修改' : `添加${label}`; } rt().toast(`${label}保存失败`); console.error(error); }
   });
-  modal.querySelector<HTMLInputElement>('#drama-asset-name')?.focus();
+  modal.querySelector<HTMLSelectElement>('#drama-asset-voice')?.addEventListener('change', event => { const help = modal.querySelector<HTMLElement>('.drama-voice-help'); if (help) help.textContent = rt().voicePreset((event.target as HTMLSelectElement).value)?.prompt || '不设置音色'; }); modal.querySelector<HTMLInputElement>('#drama-asset-name')?.focus();
 }
 
 export function openDramaVariantModal(project: ApiProject, asset: DramaAsset, variant?: DramaAssetVariant, outfit = false) {

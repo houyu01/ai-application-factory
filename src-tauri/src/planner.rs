@@ -6,10 +6,29 @@ use crate::value::NOT_GENERATED;
 
 #[path = "planner_assets.rs"]
 mod asset_catalog;
+#[path = "planner_asset_evidence.rs"]
+mod asset_evidence;
+#[cfg(test)]
+#[path = "planner_asset_evidence_tests.rs"]
+mod asset_evidence_tests;
+#[path = "planner_asset_review.rs"]
+mod asset_review;
+#[cfg(test)]
+#[path = "planner_asset_review_tests.rs"]
+mod asset_review_tests;
+#[path = "planner_game.rs"]
+mod game_plan;
+#[path = "planner_prop_evidence.rs"]
+mod prop_evidence;
 #[path = "planner_references.rs"]
 mod reference_catalog;
 
 pub(crate) use asset_catalog::extracted_assets;
+pub(crate) use asset_evidence::AssetEvidence;
+pub(crate) use asset_review::review_assets;
+#[cfg(test)]
+pub(crate) use game_plan::fallback_game_plan;
+pub(crate) use game_plan::{game_expansion_prompt, game_graph_prompt, model_game_plan};
 pub(crate) use reference_catalog::{
     key as reference_key, resolve_asset as resolve_reference_asset,
 };
@@ -54,23 +73,24 @@ pub fn model_drama_plan(
     if episodes.is_empty() {
         return None;
     }
+    let evidence = AssetEvidence::from_script(script);
     let assets = parsed["assets"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|asset| {
             let kind = asset["type"].as_str()?;
-            let name = asset["name"].as_str()?.trim();
+            let name = evidence.canonical_name(
+                kind,
+                asset["name"].as_str()?.trim(),
+                asset["source_evidence"].as_str().unwrap_or_default(),
+            )?;
             let prompt = asset["prompt"].as_str()?.trim();
             (["character", "scene", "prop"].contains(&kind) && !name.is_empty() && !prompt.is_empty())
                 .then(|| json!({"id":asset["id"],"type":kind,"name":name,"prompt":prompt,"status":NOT_GENERATED}))
         })
         .collect::<Vec<_>>();
-    let assets = if assets.is_empty() {
-        extracted_assets(script, theme)
-    } else {
-        assets
-    };
+    let assets = review_assets(script, theme, assets);
     Some(json!({"episodes":episodes,"assets":assets}))
 }
 
@@ -244,106 +264,6 @@ pub fn prompt_text(nodes: &[Value]) -> String {
         .collect()
 }
 
-/// Build the deterministic branching graph kept by the original game planner until the LLM graph planner runs.
-pub fn fallback_game_plan(game: &Value) -> Value {
-    let script = game["script"].as_str().unwrap_or_default();
-    let min = game["branch_min"].as_i64().unwrap_or(2).clamp(2, 4);
-    let max = game["branch_max"].as_i64().unwrap_or(4).clamp(2, 4);
-    let successes = game["success_ending_count"]
-        .as_i64()
-        .unwrap_or(2)
-        .clamp(1, 100);
-    let failures = game["failure_ending_count"]
-        .as_i64()
-        .unwrap_or(30)
-        .clamp(1, 200);
-    let endings = successes + failures;
-    let duration = ((game["node_duration_min"].as_i64().unwrap_or(5)
-        + game["node_duration_max"].as_i64().unwrap_or(30))
-        / 2)
-    .clamp(1, 600);
-    let mut nodes = vec![game_node(
-        "start",
-        "start",
-        "起始视频",
-        80,
-        260,
-        &clip(script, 240),
-        duration,
-        script,
-    )];
-    let mut edges = Vec::new();
-    let mut first = Vec::new();
-    for index in 0..max {
-        let id = format!("chapter_{}", index + 1);
-        nodes.push(game_node(
-            &id,
-            "normal",
-            &format!("剧情节点 {}", index + 1),
-            360,
-            80 + index * 150,
-            &clip(script, 240),
-            duration,
-            script,
-        ));
-        edges.push(json!({"id":format!("start_option_{}",index+1),"source_node_id":"start","target_node_id":id,"option_text":format!("选择路径 {}",index+1),"sort_order":index+1}));
-        first.push(id);
-    }
-    let middle = ((endings + max - 1) / max).max(max * min);
-    let mut mids = Vec::new();
-    for index in 0..middle {
-        let id = format!("branch_{}", index + 1);
-        nodes.push(game_node(
-            &id,
-            "normal",
-            &format!("分支过程 {}", index + 1),
-            650,
-            50 + index * 120,
-            &clip(script, 240),
-            duration,
-            script,
-        ));
-        mids.push(id);
-    }
-    for (index, parent) in first.iter().enumerate() {
-        for option in 0..min {
-            let target = &mids[(index * min as usize + option as usize) % mids.len()];
-            edges.push(json!({"id":format!("{parent}_option_{}",option+1),"source_node_id":parent,"target_node_id":target,"option_text":format!("继续调查 {}",option+1),"sort_order":option+1}));
-        }
-    }
-    let mut terminal = Vec::new();
-    for index in 0..endings {
-        let success = index < successes;
-        let id = format!("ending_{}", index + 1);
-        nodes.push(game_node(
-            &id,
-            if success { "success" } else { "failure" },
-            &format!(
-                "{}结局 {}",
-                if success { "成功" } else { "失败" },
-                if success {
-                    index + 1
-                } else {
-                    index - successes + 1
-                }
-            ),
-            980,
-            40 + index * 90,
-            &clip_end(script, 240),
-            duration,
-            script,
-        ));
-        terminal.push(id);
-    }
-    for (index, source) in mids.iter().enumerate() {
-        for option in 0..min {
-            let target = &terminal[(index * min as usize + option as usize) % terminal.len()];
-            edges.push(json!({"id":format!("{source}_option_{}",option+1),"source_node_id":source,"target_node_id":target,"option_text":format!("做出决定 {}",option+1),"sort_order":option+1}));
-        }
-    }
-    json!({"assets":[{"id":"char_001","type":"character","name":"主角","prompt":format!("从互动游戏剧本中提取主角的身份、外貌、服装、性格和连续性特征：{script}"),"status":NOT_GENERATED},{"id":"scene_001","type":"scene","name":"核心场景","prompt":format!("从互动游戏剧本中提取核心场景的空间、时间、光线和可连续复用的视觉特征：{script}"),"status":NOT_GENERATED},{"id":"prop_001","type":"prop","name":"关键道具","prompt":format!("从互动游戏剧本中提取关键道具及其叙事作用、外观和连续性特征：{script}"),"status":NOT_GENERATED}],"nodes":nodes,"edges":edges})
-}
-
 fn split_story(value: &str, count: usize) -> Vec<String> {
     if value.is_empty() {
         return vec![String::new(); count];
@@ -374,29 +294,6 @@ fn split_story(value: &str, count: usize) -> Vec<String> {
 fn clip(value: &str, limit: usize) -> String {
     value.chars().take(limit.max(1)).collect()
 }
-fn clip_end(value: &str, limit: usize) -> String {
-    value
-        .chars()
-        .rev()
-        .take(limit)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect()
-}
-fn game_node(
-    id: &str,
-    kind: &str,
-    title: &str,
-    x: i64,
-    y: i64,
-    text: &str,
-    duration: i64,
-    script: &str,
-) -> Value {
-    json!({"id":id,"node_type":kind,"title":title,"original_text":text,"prompt":format!("游戏剧本：{script}\n节点类型：{kind}\n节点目标：{title}\n请生成可与前后视频连续衔接的镜头、表演、场景和转场提示词。"),"duration_seconds":duration,"status":NOT_GENERATED,"position_x":x,"position_y":y,"video_history":[]})
-}
-
 #[cfg(test)]
 mod tests {
     use super::first_appearance_instruction;

@@ -16,6 +16,7 @@ use crate::{
     error::{AppError, AppResult},
     repository::Repository,
     storage::{encode_key, signing_key, StorageConfig},
+    system_voice_samples,
     value::new_id,
 };
 
@@ -42,11 +43,13 @@ impl MediaStore {
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .map_err(|error| AppError::External(error.to_string()))?;
-        Ok(Self {
+        let store = Self {
             repository,
             root,
             client,
-        })
+        };
+        store.install_system_voice_samples()?;
+        Ok(store)
     }
 
     /// Decode a browser data URL and persist it through the selected local or S3-compatible store.
@@ -77,13 +80,7 @@ impl MediaStore {
         if url.starts_with("/api/media/") {
             return Ok(url.to_owned());
         }
-        let parsed = Url::parse(url)
-            .map_err(|_| AppError::BadRequest("媒体结果 URL 必须是 http 或 https".to_owned()))?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(AppError::BadRequest(
-                "媒体结果 URL 必须是 http 或 https".to_owned(),
-            ));
-        }
+        valid_provider_media_url(url)?;
         let response = self
             .client
             .get(url)
@@ -103,6 +100,30 @@ impl MediaStore {
             .bytes()
             .map_err(|error| AppError::External(format!("读取模型媒体失败：{error}")))?;
         self.save(&bytes, extension, &content_type)
+    }
+
+    /// Keep a provider video URL only for local storage; otherwise move the completed video into the selected object store.
+    ///
+    /// Both short-drama shots and interactive-game nodes reach this boundary through `ProviderClient` after
+    /// a model reports completion. Local storage intentionally avoids a duplicate local download, while TOS,
+    /// COS, and OSS retain an app-owned copy before any history record can become playable.
+    pub fn save_generated_video_url(&self, url: &str) -> AppResult<String> {
+        let config = self.config()?;
+        if let Some(id) = url.strip_prefix("/api/media/") {
+            if config.provider == "local" {
+                return Ok(url.to_owned());
+            }
+            let id = id.split('?').next().unwrap_or(id);
+            let source = self
+                .path_for(id)
+                .ok_or_else(|| AppError::NotFound("待转存的视频媒体文件不存在".to_owned()))?;
+            return self.save(&fs::read(source)?, ".mp4", "video/mp4");
+        }
+        valid_provider_media_url(url)?;
+        if config.provider == "local" {
+            return Ok(url.to_owned());
+        }
+        self.save_url(url, ".mp4")
     }
 
     /// Save raw content and return either the local API path or a remote object URL used by the existing UI.
@@ -145,6 +166,9 @@ impl MediaStore {
             else {
                 return Ok(false);
             };
+            if system_voice_samples::is_system_media(id) {
+                return Ok(false);
+            }
             let Some(path) = self.path_for(id) else {
                 return Ok(false);
             };
@@ -178,6 +202,18 @@ impl MediaStore {
         if value.starts_with("http://") || value.starts_with("https://") {
             return public_url(value).then_some(value.to_owned());
         }
+        if let Some(id) = value
+            .strip_prefix("/api/media/")
+            .map(|value| value.split('?').next().unwrap_or(value))
+            .filter(|id| system_voice_samples::is_system_media(id))
+        {
+            let path = self.path_for(id)?;
+            let bytes = fs::read(path).ok()?;
+            return Some(format!(
+                "data:audio/mpeg;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            ));
+        }
         let config = self.config().ok()?;
         if config.provider == "local" && value.starts_with("/api/media/") {
             let id = value
@@ -204,6 +240,61 @@ impl MediaStore {
         }
     }
 
+    /// Materialize one project-owned video URL into the export worker's private staging directory.
+    ///
+    /// ZIP export uses this boundary for both app-local `/api/media` files and configured public object URLs,
+    /// so worker code never reaches into the media directory or cloud client directly.
+    pub fn copy_for_video_export(&self, value: &str, destination: &Path) -> AppResult<()> {
+        if let Some(id) = value.strip_prefix("/api/media/") {
+            let id = id.split('?').next().unwrap_or(id);
+            let source = self
+                .path_for(id)
+                .ok_or_else(|| AppError::NotFound("要导出的视频文件不存在".to_owned()))?;
+            fs::copy(source, destination)?;
+            return Ok(());
+        }
+        let url = Url::parse(value)
+            .map_err(|_| AppError::BadRequest("视频导出源不是有效媒体地址".to_owned()))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(AppError::BadRequest(
+                "视频导出仅支持本地或 http(s) 媒体".to_owned(),
+            ));
+        }
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .and_then(|response| response.error_for_status())
+            .map_err(|error| AppError::External(format!("下载导出视频失败：{error}")))?;
+        fs::write(
+            destination,
+            response
+                .bytes()
+                .map_err(|error| AppError::External(format!("读取导出视频失败：{error}")))?,
+        )?;
+        Ok(())
+    }
+
+    /// Publish the finished ZIP using the creator's configured media store for the browser's standard download flow.
+    pub fn save_video_export_zip(&self, source: &Path) -> AppResult<String> {
+        let config = self.config()?;
+        if config.provider == "local" {
+            let media_id = format!("{}.zip", new_id().replace('-', ""));
+            fs::copy(source, self.root.join(&media_id))?;
+            return Ok(format!("/api/media/{media_id}"));
+        }
+        self.save(&fs::read(source)?, "zip", "application/zip")
+    }
+
+    /// Copy the completed ZIP owned by a durable export task into a creator-selected destination.
+    ///
+    /// The native desktop save command calls this only after verifying task ownership and completion.
+    /// Local media stays inside the app directory until this boundary copies it; remote configured-storage
+    /// ZIPs are downloaded through the same vetted http(s) path used by the export worker.
+    pub fn copy_video_export_zip(&self, source_url: &str, destination: &Path) -> AppResult<()> {
+        self.copy_for_video_export(source_url, destination)
+    }
+
     fn config(&self) -> AppResult<StorageConfig> {
         StorageConfig::from_values(
             self.repository
@@ -212,6 +303,24 @@ impl MediaStore {
                 .cloned()
                 .unwrap_or_default(),
         )
+    }
+
+    /// Materialize bundled system voice bytes into local media before Settings or video workers read them.
+    ///
+    /// The fixed catalog is shipped inside the desktop binary, while the media protocol deliberately
+    /// serves only files below the app-data directory. This bridge preserves both offline playback and
+    /// the existing `/api/media/...` URL contract without invoking a model or configured cloud store.
+    fn install_system_voice_samples(&self) -> AppResult<()> {
+        for sample in system_voice_samples::all() {
+            let destination = self.root.join(sample.media_id);
+            let should_write = fs::read(&destination)
+                .map(|existing| existing.as_slice() != sample.bytes)
+                .unwrap_or(true);
+            if should_write {
+                fs::write(destination, sample.bytes)?;
+            }
+        }
+        Ok(())
     }
 
     fn s3_request(
@@ -304,6 +413,12 @@ fn extension_for_content_type(value: &str) -> &str {
         ".jpg"
     } else if value.contains("webp") {
         ".webp"
+    } else if value.contains("mpeg") || value.contains("mp3") {
+        ".mp3"
+    } else if value.contains("wav") {
+        ".wav"
+    } else if value.contains("aac") {
+        ".aac"
     } else {
         ".bin"
     }
@@ -316,4 +431,15 @@ fn public_url(value: &str) -> bool {
         && url.host_str().is_some_and(|host| {
             host != "localhost" && !host.ends_with(".local") && !host.ends_with(".internal")
         })
+}
+
+fn valid_provider_media_url(value: &str) -> AppResult<()> {
+    let parsed = Url::parse(value)
+        .map_err(|_| AppError::BadRequest("媒体结果 URL 必须是 http 或 https".to_owned()))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::BadRequest(
+            "媒体结果 URL 必须是 http 或 https".to_owned(),
+        ));
+    }
+    Ok(())
 }

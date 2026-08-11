@@ -25,8 +25,10 @@ impl DurableWorker {
         &self,
         project: &Value,
         shot: &Value,
-    ) -> AppResult<(String, Vec<String>)> {
-        let (asset_images, mut markers) = self.video_reference_plan(project, shot);
+    ) -> AppResult<(String, Vec<String>, Vec<Option<String>>)> {
+        let (asset_images, mut markers, reference_sources) =
+            self.video_reference_plan(project, shot);
+        let audio_by_image = self.video_reference_audio_urls(project, &reference_sources)?;
         let frames = self.video_boundary_frames(shot)?;
         let video_config = self.repository.setting("video")?;
         let provider = video_config["provider"].as_str().unwrap_or_default();
@@ -69,7 +71,11 @@ impl DurableWorker {
             prompt.push_str("\n\n首尾帧控制（最高优先级）：输入参考图与 @图编号按相同顺序对应。\n");
             prompt.push_str(&instructions.join("\n"));
         }
-        Ok((prompt, images))
+        let reference_audio = images
+            .iter()
+            .map(|url| audio_by_image.get(url).cloned())
+            .collect();
+        Ok((prompt, images, reference_audio))
     }
 
     /// Render the image-generation policy shared by character, scene, prop, cover, and batch jobs.
@@ -158,8 +164,14 @@ impl DurableWorker {
                 let voice = voices
                     .iter()
                     .find(|voice| voice["id"] == asset["voice_id"])?;
+                let audio_notice = voice["audio_url"]
+                    .as_str()
+                    .filter(|url| !url.is_empty())
+                    .map_or("当前音色尚未生成音源。", |_| {
+                        "已附带该音色的音源参考（如当前视频模型支持）。"
+                    });
                 Some(format!(
-                    "角色音色：{}使用{}；音色提示词：{}",
+                    "角色音色：{}使用{}；音色提示词：{}；{audio_notice}",
                     asset["name"].as_str().unwrap_or("角色"),
                     voice["name"].as_str().unwrap_or_default(),
                     voice["prompt"].as_str().unwrap_or_default(),
@@ -180,58 +192,36 @@ impl DurableWorker {
         .join("\n\n"))
     }
 
-    fn video_reference_plan(
+    /// Match each selected character reference image to its stored source audio so provider adapters can attach it without guessing by prompt text.
+    fn video_reference_audio_urls(
         &self,
         project: &Value,
-        shot: &Value,
-    ) -> (Vec<String>, HashMap<i64, usize>) {
+        sources: &[(String, String)],
+    ) -> AppResult<HashMap<String, String>> {
+        let voices = self.repository.voices()?;
         let assets = project["assets"].as_array().cloned().unwrap_or_default();
-        let mut images = Vec::new();
-        let mut marker_indexes = HashMap::new();
-        let mut asset_indexes = HashMap::new();
-        let mut seen_urls = HashSet::new();
-        for node in shot["prompt_rich"].as_array().into_iter().flatten() {
-            if node["type"] != "reference" {
-                continue;
-            }
-            let id = node["asset_id"].as_str().unwrap_or_default();
-            let base_asset = assets.iter().find(|asset| asset["id"].as_str() == Some(id));
-            if node["asset_type"].as_str() == Some("placeholder")
-                && base_asset.and_then(|asset| asset["metadata"]["render_mode"].as_str())
-                    != Some("generated_composite")
-            {
-                continue;
-            }
-            let asset = planner::resolve_reference_asset(&assets, id, node["variant_id"].as_str());
-            let url = node["snapshot_image_url"]
-                .as_str()
-                .or_else(|| node["image_url"].as_str())
-                .or_else(|| asset.as_ref().and_then(|asset| asset["image_url"].as_str()))
-                .and_then(|url| self.media.provider_reference_url(url));
-            let Some(url) = url else { continue };
-            let key = planner::reference_key(id, node["variant_id"].as_str());
-            let index = if let Some(index) = asset_indexes.get(&key) {
-                *index
-            } else if let Some(index) = images
+        let mut result = HashMap::new();
+        for (image_url, asset_id) in sources {
+            let Some(asset) = assets
                 .iter()
-                .position(|item| item == &url)
-                .map(|item| item + 1)
-            {
-                asset_indexes.insert(key.clone(), index);
-                index
-            } else if seen_urls.insert(url.clone()) {
-                images.push(url);
-                let index = images.len();
-                asset_indexes.insert(key, index);
-                index
-            } else {
+                .find(|asset| asset["id"].as_str() == Some(asset_id))
+            else {
                 continue;
             };
-            if let Some(marker) = node["mention_number"].as_i64() {
-                marker_indexes.entry(marker).or_insert(index);
+            if asset["type"].as_str() != Some("character") {
+                continue;
+            }
+            let Some(voice) = voices.iter().find(|voice| voice["id"] == asset["voice_id"]) else {
+                continue;
+            };
+            let Some(audio) = voice["audio_url"].as_str().filter(|url| !url.is_empty()) else {
+                continue;
+            };
+            if let Some(url) = self.media.provider_reference_url(audio) {
+                result.entry(image_url.clone()).or_insert(url);
             }
         }
-        (images, marker_indexes)
+        Ok(result)
     }
 
     fn video_boundary_frames(&self, shot: &Value) -> AppResult<HashMap<String, String>> {
@@ -431,11 +421,12 @@ mod tests {
         let project = json!({"video_model":"doubao-seedance-2.0","style":"真人风格","theme":"都市","shot_constraints":{},"assets":[{"id":"scene","type":"scene","image_url":scene}]});
         let shot = json!({"prompt":"场景：@图1（旧居）","prompt_rich":[{"type":"reference","asset_id":"scene","asset_type":"scene","mention_number":1}],"first_last_frames":{"first":{"url":first}}});
 
-        let (prompt, images) = worker
+        let (prompt, images, audio) = worker
             .video_generation_inputs(&project, &shot)
             .expect("video inputs");
 
         assert_eq!(images.first().map(String::as_str), Some(first));
+        assert_eq!(audio.len(), images.len());
         assert!(prompt.contains("首帧图锁定（最高优先级，必须遵守）"));
         assert!(prompt.contains("@图1 是本分镜已明确选择的首帧图"));
         assert!(prompt.contains("场景：@图2"));

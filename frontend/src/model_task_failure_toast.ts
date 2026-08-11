@@ -13,8 +13,9 @@ const labels: Record<string, string> = {
   script_decomposition: '剧本生成', script_expansion: '剧本扩写', shot_prompt: '分镜提示词生成',
   shot_quality: '分镜质量检查', asset_image: '素材图片生成', asset_variant_image: '素材形态图片生成',
   asset_image_batch: '素材图片批量生成', shot_reference_image_batch: '分镜参考图批量生成',
-  placeholder_image: '占位图生成', cover_image: '封面生成', shot_video: '分镜视频生成',
-  game_graph_decomposition: '互动游戏图谱生成', node_video_generation: '互动游戏节点视频生成',
+  placeholder_image: '占位图生成', cover_image: '封面生成', shot_video: '分镜视频生成', drama_video_export: '视频打包下载',
+  game_script_expansion: '互动游戏剧本扩写', game_graph_decomposition: '互动游戏图谱生成', node_video_generation: '互动游戏节点视频生成',
+  game_cover_image: '互动游戏封面生成', game_placeholder_image: '互动游戏占位图生成',
 };
 
 function failureText(task: FailedModelTask) {

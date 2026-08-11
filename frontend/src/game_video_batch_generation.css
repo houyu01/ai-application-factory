@@ -1,0 +1,13 @@
+/* Split all-node video-generation controls in the interactive-game toolbar. */
+.game-video-batch-actions { position: relative; display: inline-flex; align-items: stretch; }
+.game-video-batch-actions #game-generate-all-videos { border-radius: var(--ui-radius-control) 0 0 var(--ui-radius-control) !important; }
+.game-video-batch-toggle { display: inline-grid; place-items: center; min-width: 38px; margin-left: 0 !important; padding: 0; border-left: 1px solid #ffffff66 !important; border-radius: 0 var(--ui-radius-control) var(--ui-radius-control) 0 !important; }
+.game-video-batch-toggle::before { width: 9px; height: 9px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; content: ''; transform: translateY(-2px) rotate(45deg); }
+.game-video-batch-toggle:focus-visible, .game-video-batch-menu button:focus-visible { outline: 2px solid #e99137; outline-offset: 2px; }
+.game-video-batch-menu { position: absolute; z-index: 100; top: calc(100% + 6px); right: 0; min-width: 132px; padding: 5px; border: 1px solid #dededc; border-radius: 9px; background: #fff; box-shadow: 0 12px 28px #0002; }
+.game-video-batch-menu button { display: block; width: 100%; padding: 8px 10px; border-radius: 6px; color: #303237; font-size: 12px; text-align: left; }
+.game-video-batch-menu button:hover { background: #f4f3ef; }
+.game-video-batch-menu button:disabled { cursor: wait; opacity: .6; }
+:root[data-theme='dark'] .game-video-batch-menu { border-color: #454951; background: #121417; }
+:root[data-theme='dark'] .game-video-batch-menu button { color: #f1f3f5; }
+:root[data-theme='dark'] .game-video-batch-menu button:hover { background: #2a2d32; }

@@ -8,6 +8,7 @@ export type DramaVideoHistoryRecord = {
   progress?: number;
   providerTaskId?: string | null;
   refinementPrompt?: string | null;
+  selectedForExport?: boolean;
   status: string;
   taskId?: string | null;
   url?: string | null;
@@ -31,6 +32,7 @@ function versionRecord(version: DramaShotVersion, knownKeys: Set<string>): Drama
     progress: version.progress,
     providerTaskId: version.provider_task_id,
     refinementPrompt: version.refinement_prompt,
+    selectedForExport: Boolean(version.is_selected_for_export),
     status: version.status,
     taskId: version.task_id,
     url: version.video_url,
