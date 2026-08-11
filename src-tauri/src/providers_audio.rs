@@ -9,7 +9,7 @@ use crate::{
     error::{AppError, AppResult},
     volcengine_tts::{
         decode_http_audio_chunks, speaker_for_voice, unidirectional_payload,
-        voice_style_instruction, HTTP_ENDPOINT, RESOURCE_ID,
+        voice_style_instruction, HTTP_ENDPOINT,
     },
 };
 
@@ -86,11 +86,15 @@ impl ProviderClient {
             .as_str()
             .filter(|value| !value.is_empty())
             .unwrap_or(HTTP_ENDPOINT);
+        let resource_id = model_for(config, None);
+        if resource_id.is_empty() {
+            return Err(AppError::BadRequest("音频模型尚未配置模型名称".to_owned()));
+        }
         let response = self
             .client
             .post(endpoint)
             .header("X-Api-Key", key)
-            .header("X-Api-Resource-Id", RESOURCE_ID)
+            .header("X-Api-Resource-Id", resource_id)
             .json(&unidirectional_payload(
                 &Uuid::new_v4().simple().to_string(),
                 text,

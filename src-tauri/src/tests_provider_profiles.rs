@@ -130,8 +130,34 @@ fn ark_audio_candidate_defaults_to_seed_tts_two_v3() {
         "https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional"
     );
     assert_eq!(candidate["model"], "seed-tts-2.0");
+    assert_eq!(candidate["models"], json!(["seed-tts-2.0"]));
     assert!(candidate.get("app_id").is_none());
     assert!(candidate.get("resource_id").is_none());
     assert!(candidate.get("voice").is_none());
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn ark_audio_candidate_preserves_the_selected_model_resource() {
+    let (repository, root) = test_repository();
+
+    let candidate = repository
+        .model_config_candidate(&Map::from_iter([
+            ("kind".to_owned(), json!("audio")),
+            ("provider".to_owned(), json!("ark")),
+            ("api_key".to_owned(), json!("speech-token")),
+            ("model".to_owned(), json!("seed-tts-2.0-custom")),
+            (
+                "models".to_owned(),
+                json!(["seed-tts-2.0", "seed-tts-2.0-custom"]),
+            ),
+        ]))
+        .expect("custom Seed-TTS candidate");
+
+    assert_eq!(candidate["model"], "seed-tts-2.0-custom");
+    assert_eq!(
+        candidate["models"],
+        json!(["seed-tts-2.0", "seed-tts-2.0-custom"])
+    );
     fs::remove_dir_all(root).expect("remove test data");
 }
