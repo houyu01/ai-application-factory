@@ -27,9 +27,11 @@ fn project_list_editor_projection_and_model_queues_keep_python_contracts() {
                 "script".to_owned(),
                 json!("林岩在旧宅找到钥匙，苏晚赶来阻止他继续调查。"),
             ),
+            ("enable_web_search".to_owned(), json!(true)),
         ]))
         .expect("create project");
     let id = project["id"].as_str().expect("project id");
+    assert_eq!(project["enable_web_search"], true);
     assert_eq!(project["task"]["stage"], "");
     let listed = repository.list_dramas().expect("project list");
     assert_eq!(listed[0]["script"], "");
@@ -51,6 +53,13 @@ fn project_list_editor_projection_and_model_queues_keep_python_contracts() {
         .finish_drama_task(bootstrap, SUCCEEDED, None, None)
         .expect("finish bootstrap");
     let detail = repository.get_drama(id).expect("detail");
+    let updated = repository
+        .update_drama(
+            id,
+            Map::from_iter([("enable_web_search".to_owned(), json!(false))]),
+        )
+        .expect("disable web search");
+    assert_eq!(updated["enable_web_search"], false);
     let shot_id = detail["shots"][0]["id"].as_str().expect("shot id");
     let version = repository
         .create_shot_version(id, shot_id, "task-version", "version prompt")

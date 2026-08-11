@@ -23,7 +23,7 @@ const VOICE_IDS: &[&str] = &[
 ///
 /// The bootstrap worker calls this after the model returns its plan but before SQLite persistence.
 /// It protects image generation from terse model output and deliberately never reads project public prompts.
-pub(super) fn enrich(plan: &mut Value, theme: &str) {
+pub(super) fn enrich(plan: &mut Value, theme: &str, style: &str) {
     let Some(assets) = plan["assets"].as_array_mut() else {
         return;
     };
@@ -34,24 +34,27 @@ pub(super) fn enrich(plan: &mut Value, theme: &str) {
             .unwrap_or("未命名素材")
             .trim()
             .to_owned();
-        let source = asset["prompt"]
-            .as_str()
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
-        asset["prompt"] = json!(private_prompt(&kind, &name, &source, theme, index));
+        let source = visual_description(asset["prompt"].as_str().unwrap_or_default());
+        asset["prompt"] = json!(private_prompt(&kind, &name, &source, theme, style, index));
         if kind == "character" {
             let voice = asset["voice_id"]
                 .as_str()
                 .filter(|id| VOICE_IDS.contains(id))
                 .unwrap_or_else(|| matching_voice(&name, &source));
             asset["voice_id"] = json!(voice);
-            enrich_variants(asset, &name, &source, theme);
+            enrich_variants(asset, &name, &source, theme, style);
         }
     }
 }
 
-fn private_prompt(kind: &str, name: &str, source: &str, theme: &str, index: usize) -> String {
+fn private_prompt(
+    kind: &str,
+    name: &str,
+    source: &str,
+    theme: &str,
+    style: &str,
+    index: usize,
+) -> String {
     let source = if source.is_empty() {
         fallback_description(kind, name, index)
     } else {
@@ -59,35 +62,49 @@ fn private_prompt(kind: &str, name: &str, source: &str, theme: &str, index: usiz
     };
     match kind {
         "character" => format!(
-            "叙述背景主题：{theme}\n角色身份与性格：{source}\n基础形态外观设定：{}\n连续性要求：基础形态的发型、脸部特征、身型、服装层次和随身配饰在同一形态的后续镜头中保持一致；如剧本列有其他年龄、状态或换装形态，必须改用对应形态参考图，不能与基础形态混用；真人电影级细节，无文字水印。",
+            "叙述背景主题：{theme}\n风格：{style}\n角色身份与性格：{source}\n外观设定：{}\n连续性要求：基础形态的发型、脸部特征、身型、服装层次和随身配饰在同一形态的后续镜头中保持一致；如剧本列有其他年龄、状态或换装形态，必须改用对应形态参考图，不能与基础形态混用；呈现{style}视觉细节，无文字水印。",
             character_appearance(index, is_female(name, &source))
         ),
         "scene" => format!(
-            "叙述背景主题：{theme}\n场景名称与剧情用途：{name}，{source}\n空间与主体：{}\n陈设与氛围：场内物件带有真实使用状态，色调、主光和空气感服务于剧情；无人物、无背景文字、无水印。",
+            "叙述背景主题：{theme}\n风格：{style}\n场景名称与剧情用途：{name}，{source}\n空间与主体：{}\n陈设与氛围：场内物件带有真实使用状态，色调、主光和空气感服务于剧情；无人物、无背景文字、无水印。",
             scene_structure(index)
         ),
         _ => format!(
-            "叙述背景主题：{theme}\n道具名称与叙事用途：{name}，{source}\n外观细节：{}\n呈现限制：单一主体清晰完整，干净静物构图，材质纹理和磨损可辨，无品牌、无多余文字、无水印。",
+            "叙述背景主题：{theme}\n风格：{style}\n道具名称与叙事用途：{name}，{source}\n外观细节：{}\n呈现限制：单一主体清晰完整，干净静物构图，材质纹理和磨损可辨，无品牌、无多余文字、无水印。",
             prop_details(index)
         ),
     }
 }
 
+/// Remove global headers emitted by the model so the persisted template owns theme and style exactly once.
+fn visual_description(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            !line.starts_with("叙述背景主题：") && !line.starts_with("风格：")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_owned()
+}
+
 /// Preserve every model-extracted character form as an independently usable image prompt.
-fn enrich_variants(asset: &mut Value, name: &str, identity: &str, theme: &str) {
+fn enrich_variants(asset: &mut Value, name: &str, identity: &str, theme: &str, style: &str) {
     let Some(variants) = asset["variants"].as_array_mut() else {
         return;
     };
     for variant in variants {
         let form_name = variant["name"].as_str().unwrap_or("其他形态").trim();
-        let form_source = variant["prompt"].as_str().unwrap_or_default().trim();
+        let form_source = visual_description(variant["prompt"].as_str().unwrap_or_default());
         let source = if form_source.is_empty() {
             format!("{form_name}，外观必须与剧本明确的阶段变化一致。")
         } else {
             form_source.to_owned()
         };
         variant["prompt"] = json!(format!(
-            "叙述背景主题：{theme}\n角色身份锚点：{name}。{identity}\n当前形态：{form_name}。{source}\n形态绘制要求：清楚表现该阶段的年龄/生命时期、脸型和体态比例、发型、服装层次、配饰、伤痕或状态变化；与“{name}”保持可辨认的同一角色核心特征，但绝不沿用其他形态的年龄和服装；完整单人角色设定图，无文字水印。"
+            "叙述背景主题：{theme}\n风格：{style}\n角色身份锚点：{name}。{identity}\n当前形态：{form_name}。{source}\n形态绘制要求：清楚表现该阶段的年龄/生命时期、脸型和体态比例、发型、服装层次、配饰、伤痕或状态变化；与“{name}”保持可辨认的同一角色核心特征，但绝不沿用其他形态的年龄和服装；完整单人角色设定图，无文字水印。"
         ));
     }
 }
@@ -182,11 +199,11 @@ mod tests {
             {"type":"prop","name":"泛黄信件","prompt":"揭示失踪线索的信件。"}
         ]});
 
-        enrich(&mut plan, "都市");
+        enrich(&mut plan, "都市", "真人风格");
         let assets = plan["assets"].as_array().expect("assets");
         assert!(assets.iter().all(|asset| asset["prompt"]
             .as_str()
-            .is_some_and(|text| text.contains("叙述背景主题：都市"))));
+            .is_some_and(|text| text.starts_with("叙述背景主题：都市\n风格：真人风格\n"))));
         assert!(assets[0]["voice_id"]
             .as_str()
             .is_some_and(|id| id != "none"));
@@ -207,10 +224,32 @@ mod tests {
             "type":"character","name":"林砚","prompt":"成年后成为克制的剑修。",
             "variants":[{"name":"幼年形态","prompt":"八岁，圆脸，短发，粗布短褂，赤脚。"}]
         }]});
-        enrich(&mut plan, "仙侠");
+        enrich(&mut plan, "仙侠", "2D动漫风");
         let form = &plan["assets"][0]["variants"][0]["prompt"];
-        assert!(form
+        assert!(form.as_str().is_some_and(|text| text.contains("八岁")
+            && text.contains("幼年形态")
+            && text.contains("风格：2D动漫风")));
+    }
+
+    #[test]
+    fn generated_prompt_does_not_repeat_model_theme_or_style_headers() {
+        let mut plan = json!({"assets":[{
+            "type":"character","name":"林岩",
+            "prompt":"叙述背景主题：玄幻\n风格：真人风格\n青年剑修，遇险时先观察环境再保护同伴。"
+        }]});
+
+        enrich(&mut plan, "玄幻", "真人风格");
+
+        assert_eq!(
+            plan["assets"][0]["prompt"]
+                .as_str()
+                .expect("prompt")
+                .matches("叙述背景主题：")
+                .count(),
+            1,
+        );
+        assert!(plan["assets"][0]["prompt"]
             .as_str()
-            .is_some_and(|text| text.contains("八岁") && text.contains("幼年形态")));
+            .is_some_and(|text| text.contains("角色身份与性格：青年剑修")));
     }
 }

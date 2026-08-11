@@ -4,7 +4,9 @@ use std::fs;
 
 use serde_json::{json, Map};
 
-use crate::{db::Database, repository::Repository, value::new_id};
+use crate::{
+    db::Database, media::MediaStore, repository::Repository, system_voice_samples, value::new_id,
+};
 
 fn repository() -> (Repository, std::path::PathBuf) {
     let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
@@ -129,6 +131,68 @@ fn creator_voice_preset_is_persisted_and_can_be_assigned_to_a_character() {
         ]))
         .expect_err("duplicate name is rejected");
     assert_eq!(duplicate.to_string(), "已存在同名音色，请修改名称后再保存");
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn bundled_system_voice_samples_are_playable_without_audio_model_generation() {
+    let (repository, root) = repository();
+    let media = MediaStore::new(repository.clone()).expect("install bundled media");
+    let voices = repository.voices().expect("voice catalog");
+
+    for sample in system_voice_samples::all() {
+        let url = format!("/api/media/{}", sample.media_id);
+        assert!(media.path_for(sample.media_id).is_some());
+        assert!(voices.iter().any(|voice| {
+            voice["id"] == sample.id && voice["audio_url"].as_str() == Some(url.as_str())
+        }));
+        assert!(sample.bytes.len() > 1_000);
+    }
+    let bundled_url = system_voice_samples::audio_url("cold_boss_male").expect("bundled URL");
+    assert!(!media
+        .delete_url(Some(&bundled_url))
+        .expect("keep bundled audio"));
+    assert!(media.path_for("system-voice-cold_boss_male.mp3").is_some());
+    assert!(repository
+        .create_voice_audio_task(Map::from_iter([(
+            "voice_id".to_owned(),
+            json!("cold_boss_male")
+        )]))
+        .expect_err("system voice must not queue a generation task")
+        .to_string()
+        .contains("已内置试听音源"));
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn custom_voice_requires_a_completed_source_audio_preview_before_catalog_confirmation() {
+    let (repository, root) = repository();
+    let task = repository
+        .create_voice_audio_task(Map::from_iter([
+            ("name".to_owned(), json!("冷静讲述者")),
+            ("gender".to_owned(), json!("中性")),
+            (
+                "prompt".to_owned(),
+                json!("克制平稳、吐字清晰，带少量低沉质感。"),
+            ),
+        ]))
+        .expect("create durable preview");
+    let task_id = task["id"].as_str().expect("task id");
+    assert_eq!(task["sample_text"], "你好，很高兴在这个故事里与你相遇。");
+    assert!(repository.confirm_voice_audio_preview(task_id).is_err());
+
+    repository
+        .finish_voice_audio_task(task_id, "/api/media/voice.mp3")
+        .expect("store preview");
+    let voice = repository
+        .confirm_voice_audio_preview(task_id)
+        .expect("confirm preview");
+    assert_eq!(voice["audio_url"], "/api/media/voice.mp3");
+    assert!(repository
+        .voices()
+        .expect("catalog")
+        .iter()
+        .any(|item| item["id"] == voice["id"] && item["audio_url"] == "/api/media/voice.mp3"));
     fs::remove_dir_all(root).expect("remove test data");
 }
 

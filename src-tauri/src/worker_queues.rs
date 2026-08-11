@@ -30,7 +30,7 @@ const QUEUE_TASK_TYPES: [&[&str]; 4] = [
         "placeholder_image",
         "cover_image",
     ],
-    &["shot_video"],
+    &["shot_video", "drama_video_export"],
     &["audio_generation"],
 ];
 
@@ -111,10 +111,21 @@ fn run_slot(worker: DurableWorker, queue: usize, slot: usize) {
                 }
             })
             .unwrap_or(false);
-        let game_work = if queue == 2 && !did_work {
+        let game_types = match queue {
+            0 => &["game_script_expansion", "game_graph_decomposition"][..],
+            1 => &[
+                "game_asset_image",
+                "game_asset_variant_image",
+                "game_cover_image",
+                "game_placeholder_image",
+            ][..],
+            2 => &["node_video_generation"][..],
+            _ => &[],
+        };
+        let game_work = if !did_work {
             worker
                 .repository
-                .claim_game_task()
+                .claim_game_task_types(game_types)
                 .map(|task| {
                     if let Some(task) = task {
                         worker.run_game(task);
@@ -127,7 +138,23 @@ fn run_slot(worker: DurableWorker, queue: usize, slot: usize) {
         } else {
             false
         };
-        if !did_work && !game_work {
+        let voice_work = if !did_work && !game_work && queue == 3 {
+            worker
+                .repository
+                .claim_voice_audio_task()
+                .map(|task| {
+                    if let Some(task) = task {
+                        worker.run_voice_audio(task);
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        if !did_work && !game_work && !voice_work {
             thread::sleep(Duration::from_millis(500));
         }
     }

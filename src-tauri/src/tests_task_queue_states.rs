@@ -125,3 +125,91 @@ fn restart_resumes_remote_video_polls_and_exposes_interrupted_image_retry() {
     assert_eq!(recovered_video["stage"], "正在恢复视频任务轮询");
     fs::remove_dir_all(root).expect("remove test data");
 }
+
+#[test]
+fn game_expansion_with_an_expired_lease_becomes_retryable_failure() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let path = root.join("ai_application_factory.db");
+    let database = Database::open(path).expect("test database");
+    let repository = Repository::new(database.clone());
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("失联工作线程")),
+            (
+                "script".to_owned(),
+                json!("玩家在钟楼发现失踪同伴的录音，需要在警报响起前找出出口。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    let task_id = game["task"]["id"].as_str().expect("task id");
+    database
+        .with_connection(|connection| {
+            connection.execute(
+                "UPDATE game_tasks SET poll_lease_token='lost-worker',poll_lease_until='2000-01-01T00:00:00Z' WHERE id=?1",
+                [task_id],
+            )?;
+            Ok(())
+        })
+        .expect("seed expired game lease");
+
+    let recovered = repository.get_game(game_id).expect("load recovered game");
+    let task = recovered["tasks"]
+        .as_array()
+        .expect("game tasks")
+        .iter()
+        .find(|task| task["id"] == task_id)
+        .expect("recovered task");
+    assert_eq!(recovered["status"], FAILED);
+    assert_eq!(task["status"], FAILED);
+    assert!(task["error_message"]
+        .as_str()
+        .expect("failure reason")
+        .contains("停止续租"));
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn restart_marks_in_progress_game_generation_failed() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let path = root.join("ai_application_factory.db");
+    let database = Database::open(path.clone()).expect("test database");
+    let repository = Repository::new(database);
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("重启中的游戏")),
+            (
+                "script".to_owned(),
+                json!("玩家在废弃钟楼收到陌生录音，需要选择线索并找到失踪搭档。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    let task_id = game["task"]["id"].as_str().expect("task id");
+    repository
+        .update_game_task_snapshot(
+            task_id,
+            json!({"game_id":game_id,"expanded_script_preview":"已保存的扩写片段"}),
+        )
+        .expect("save checkpoint");
+
+    Database::open(path).expect("restart recovers game task");
+    let recovered = repository.get_game(game_id).expect("load recovered game");
+    let task = recovered["tasks"]
+        .as_array()
+        .expect("game tasks")
+        .iter()
+        .find(|task| task["id"] == task_id)
+        .expect("recovered task");
+    assert_eq!(recovered["status"], FAILED);
+    assert_eq!(task["status"], FAILED);
+    assert_eq!(
+        task["input_snapshot"]["expanded_script_preview"],
+        "已保存的扩写片段"
+    );
+    assert!(task["error_message"]
+        .as_str()
+        .expect("failure reason")
+        .contains("无法恢复"));
+    fs::remove_dir_all(root).expect("remove test data");
+}

@@ -17,7 +17,9 @@ mod service_deletion;
 mod service_video;
 mod skills;
 mod storage;
+mod system_voice_samples;
 mod value;
+mod volcengine_tts;
 mod worker;
 
 #[cfg(test)]
@@ -26,6 +28,18 @@ mod tests;
 mod tests_api_routes;
 #[cfg(test)]
 mod tests_asset_contracts;
+#[cfg(test)]
+mod tests_game_graph_editing;
+#[cfg(test)]
+mod tests_game_material_images;
+#[cfg(test)]
+mod tests_game_rich_prompts;
+#[cfg(test)]
+mod tests_game_state;
+#[cfg(test)]
+mod tests_game_video_tasks;
+#[cfg(test)]
+mod tests_game_workflows;
 #[cfg(test)]
 mod tests_project_contracts;
 #[cfg(test)]
@@ -37,7 +51,11 @@ mod tests_provider_profiles;
 #[cfg(test)]
 mod tests_task_queue_states;
 #[cfg(test)]
+mod tests_video_exports;
+#[cfg(test)]
 mod tests_video_refinement;
+#[cfg(test)]
+mod tests_video_storage;
 
 use std::path::PathBuf;
 

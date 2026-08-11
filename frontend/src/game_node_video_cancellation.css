@@ -1,0 +1,14 @@
+/* Split generation and cancellation controls for a durable game-node video task. */
+
+.game-node-video-generation-actions { position: relative; display: inline-flex; flex: 0 0 auto; align-items: stretch; }
+.game-node-video-generation-actions #node-generate { border-radius: var(--ui-radius-control); }
+.game-node-video-generation-actions:has(.game-node-video-cancel-toggle:not([hidden])) #node-generate { border-radius: var(--ui-radius-control) 0 0 var(--ui-radius-control); }
+.game-node-video-cancel-toggle { display: inline-grid; min-width: 34px; place-items: center; margin-left: 0; padding: 0; border-left: 1px solid #ffffff55; border-radius: 0 var(--ui-radius-control) var(--ui-radius-control) 0; line-height: 0; }
+.game-node-video-cancel-toggle[hidden] { display: none; }
+.game-node-video-cancel-toggle::before { width: 9px; height: 9px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; content: ''; transform: translateY(-2px) rotate(45deg); }
+.game-node-video-cancel-toggle:focus-visible, .game-node-video-cancel-menu button:focus-visible { outline: 2px solid #e99137; outline-offset: 2px; }
+.game-node-video-cancel-menu { position: absolute; z-index: 45; top: 100%; right: 0; min-width: 112px; padding: 5px; border: 1px solid #dededc; border-radius: 9px; background: #fff; box-shadow: 0 12px 28px #0002; }
+.game-node-video-cancel-menu button { display: block; width: 100%; padding: 8px 10px; border-radius: 6px; color: #c7544b; font-size: 12px; text-align: left; }
+.game-node-video-cancel-menu button:hover { background: #fff0ed; color: #a33c35; }
+:root[data-theme='dark'] .game-node-video-cancel-menu { border-color: #454951; background: #121417; }
+:root[data-theme='dark'] .game-node-video-cancel-menu button:hover { background: #3b2422; color: #ffaea7; }

@@ -25,6 +25,7 @@ impl ProviderClient {
         resolution: &str,
         seconds: i64,
         references: &[String],
+        _reference_audio: &[Option<String>],
         reference_video: Option<&str>,
     ) -> AppResult<VideoJob> {
         let (name, version) = tencent_model_parts(model, model, "");

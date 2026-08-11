@@ -9,6 +9,8 @@ use crate::{
     repository::Repository,
 };
 
+#[path = "providers_audio.rs"]
+mod audio;
 #[path = "providers_client.rs"]
 mod client;
 #[path = "providers_error_translation.rs"]

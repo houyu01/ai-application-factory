@@ -9,7 +9,10 @@ use crate::{
     value::{json_text, new_id, now, row_to_json, string, GENERATING, NOT_GENERATED, SUCCEEDED},
 };
 
-use super::Repository;
+use super::{
+    project_validation::{create_integer, optional_boolean},
+    Repository,
+};
 
 impl Repository {
     /// Persist a drama and its durable bootstrap task atomically before a worker sees it.
@@ -20,6 +23,7 @@ impl Repository {
             return Err(AppError::BadRequest("剧本文本不少于 10 个字".to_owned()));
         }
         let episode_count = create_integer(&values, "episode_count", 25, 2, 100)?;
+        let enable_web_search = optional_boolean(&values, "enable_web_search")?.unwrap_or(false);
         let minimum = create_integer(&values, "expanded_script_min_chars", 5_000, 1, 1_000_000)?;
         let maximum = create_integer(&values, "expanded_script_max_chars", 10_000, 1, 1_000_000)?;
         let shot_limit = create_integer(&values, "shot_script_max_chars", 400, 1, 1_000_000)?;
@@ -33,7 +37,7 @@ impl Repository {
         let timestamp = now();
         let snapshot = json!({
             "drama_id": id, "script": script, "language_model": string(&values, "language_model", "doubao-seed"),
-            "episode_count": episode_count, "enable_web_search": values.get("enable_web_search").and_then(Value::as_bool).unwrap_or(false),
+            "episode_count": episode_count, "enable_web_search": enable_web_search,
             "expanded_script_min_chars": minimum, "expanded_script_max_chars": maximum,
             "shot_script_max_chars": shot_limit,
         });
@@ -41,7 +45,7 @@ impl Repository {
             let transaction = connection.unchecked_transaction()?;
             transaction.execute(
                 "INSERT INTO short_dramas (id,name,script,ratio,style,theme,language_model,multimodal_model,video_model,episode_count,enable_web_search,expanded_script_min_chars,expanded_script_max_chars,shot_script_max_chars,resolution,video_public_prompt,asset_public_prompts_json,shot_constraints_json,status,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?20)",
-                params![id, name, script, string(&values,"ratio","9:16"), string(&values,"style","真人风格"), string(&values,"theme","都市"), string(&values,"language_model","doubao-seed"), string(&values,"multimodal_model","doubao-seeddream"), string(&values,"video_model","doubao-seedance-2.0"), episode_count, values.get("enable_web_search").and_then(Value::as_bool).unwrap_or(false) as i64, minimum, maximum, shot_limit, string(&values,"resolution","720p"), string(&values,"video_public_prompt",""), json_text(values.get("asset_public_prompts").unwrap_or(&json!({}))), json_text(values.get("shot_constraints").unwrap_or(&json!({}))), GENERATING, timestamp],
+                params![id, name, script, string(&values,"ratio","9:16"), string(&values,"style","真人风格"), string(&values,"theme","都市"), string(&values,"language_model","doubao-seed"), string(&values,"multimodal_model","doubao-seeddream"), string(&values,"video_model","doubao-seedance-2.0"), episode_count, enable_web_search as i64, minimum, maximum, shot_limit, string(&values,"resolution","720p"), string(&values,"video_public_prompt",""), json_text(values.get("asset_public_prompts").unwrap_or(&json!({}))), json_text(values.get("shot_constraints").unwrap_or(&json!({}))), GENERATING, timestamp],
             )?;
             transaction.execute(
                 "INSERT INTO generation_tasks (id,drama_id,type,job_id,task_no,trigger_type,status,input_snapshot_json,progress,stage,created_at,started_at) VALUES (?1,?2,'script_decomposition',?2,1,'DRAMA_BOOTSTRAP',?3,?4,0,'',?5,?5)",
@@ -143,6 +147,10 @@ impl Repository {
                     set.push(format!("{column}=?"));
                     parameters.push(Box::new(value.to_owned()));
                 }
+            }
+            if let Some(value) = optional_boolean(&values, "enable_web_search")? {
+                set.push("enable_web_search=?".to_owned());
+                parameters.push(Box::new(value as i64));
             }
             for (key, column) in [
                 ("asset_public_prompts", "asset_public_prompts_json"),
@@ -371,26 +379,6 @@ impl Repository {
     }
 }
 
-fn create_integer(
-    values: &Map<String, Value>,
-    key: &str,
-    default: i64,
-    minimum: i64,
-    maximum: i64,
-) -> AppResult<i64> {
-    let value = values.get(key).map_or(Ok(default), |value| {
-        value
-            .as_i64()
-            .ok_or_else(|| AppError::BadRequest(format!("{key} 必须是整数")))
-    })?;
-    if !(minimum..=maximum).contains(&value) {
-        return Err(AppError::BadRequest(format!(
-            "{key} 必须在 {minimum} 到 {maximum} 之间"
-        )));
-    }
-    Ok(value)
-}
-
 fn editor_shot(shot: Value, selected: &str) -> Value {
     let versions = shot["versions"]
         .as_array()
@@ -427,6 +415,7 @@ fn editor_version(version: &Value) -> Value {
         "refinement_prompt",
         "video_url",
         "error_message",
+        "is_selected_for_export",
         "created_at",
         "completed_at",
     ] {

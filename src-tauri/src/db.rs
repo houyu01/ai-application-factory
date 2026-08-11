@@ -7,7 +7,7 @@ use std::{
 
 use rusqlite::{Connection, OpenFlags};
 
-use crate::{error::AppResult, migration::migrate_legacy_schema, value::now};
+use crate::{error::AppResult, migration::migrate_legacy_schema, system_voice_samples, value::now};
 
 const CHARACTER_INTRODUCTION_TEMPLATE_RULE: &str = "若分镜原文包含“【人物首次出场：当前名字｜人物描述：…】”，保留该描述；在人物第一次清晰入画的对应镜头加入“【人物姓名标识｜姓名：当前角色素材 name｜时长：1～2s｜位置：人物近旁且不遮挡脸部｜效果：快速淡入淡出】”。姓名必须使用当前角色素材的 name；它不是字幕，即使 subtitles 为 false 也必须保留，并且同一人物只能展示一次。";
 
@@ -101,6 +101,16 @@ fn seed_voice_presets(connection: &Connection) -> AppResult<()> {
             "INSERT OR IGNORE INTO voice_presets (id, name, gender, prompt, sort_order, enabled, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
             rusqlite::params![id, name, gender, prompt, index as i64, timestamp],
         )?;
+        if let Some(audio_url) = system_voice_samples::audio_url(id) {
+            connection.execute(
+                "UPDATE voice_presets SET audio_url=?1,updated_at=?2 WHERE id=?3 AND (audio_url IS NULL OR audio_url<>?1)",
+                rusqlite::params![audio_url, timestamp, id],
+            )?;
+            connection.execute(
+                "DELETE FROM voice_generation_tasks WHERE voice_id=?1",
+                rusqlite::params![id],
+            )?;
+        }
     }
     Ok(())
 }
@@ -142,22 +152,138 @@ CREATE TABLE IF NOT EXISTS drama_shot_versions (
  prompt TEXT NOT NULL DEFAULT '', prompt_rich_json TEXT NOT NULL DEFAULT '[]', structured_json TEXT NOT NULL DEFAULT '{}', quality_json TEXT NOT NULL DEFAULT '{}',
  -- Refinement provenance identifies the selected history item, its source video, and the creator's saved feedback.
  refinement_source_version_id TEXT, source_video_url TEXT, refinement_prompt TEXT NOT NULL DEFAULT '',
- provider_task_id TEXT, progress INTEGER NOT NULL DEFAULT 0, video_url TEXT, error_message TEXT, created_at TEXT NOT NULL, completed_at TEXT,
+ provider_task_id TEXT, progress INTEGER NOT NULL DEFAULT 0, video_url TEXT, error_message TEXT,
+ -- The creator's one selected completed version per shot, used as the default in the ZIP export dialog.
+ is_selected_for_export INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, completed_at TEXT,
  FOREIGN KEY (drama_id) REFERENCES short_dramas(id) ON DELETE CASCADE, FOREIGN KEY (shot_id) REFERENCES drama_shots(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS prompt_templates (id TEXT PRIMARY KEY, scope TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, template_text TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(scope, name, version));
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS voice_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, gender TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS interactive_games (id TEXT PRIMARY KEY, name TEXT NOT NULL, script TEXT NOT NULL, platform TEXT NOT NULL, style TEXT NOT NULL, success_ending_count INTEGER NOT NULL, failure_ending_count INTEGER NOT NULL, branch_min INTEGER NOT NULL, branch_max INTEGER NOT NULL, node_duration_min INTEGER NOT NULL, node_duration_max INTEGER NOT NULL, language_model TEXT NOT NULL, multimodal_model TEXT NOT NULL, video_model TEXT NOT NULL DEFAULT 'doubao-seedance-2.0', status TEXT NOT NULL, assets_json TEXT NOT NULL DEFAULT '[]', nodes_json TEXT NOT NULL DEFAULT '[]', edges_json TEXT NOT NULL DEFAULT '[]', historical_videos_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS game_assets (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, type TEXT NOT NULL, name TEXT NOT NULL, prompt TEXT NOT NULL, image_url TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS game_nodes (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, node_type TEXT NOT NULL, title TEXT NOT NULL, original_text TEXT NOT NULL, prompt TEXT NOT NULL, video_url TEXT, duration_seconds INTEGER NOT NULL, status TEXT NOT NULL, position_x INTEGER NOT NULL DEFAULT 0, position_y INTEGER NOT NULL DEFAULT 0, video_history_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS voice_presets (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, gender TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '', audio_url TEXT, sort_order INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS voice_generation_tasks (
+ id TEXT PRIMARY KEY,
+ -- Existing catalog voice updated by this task; NULL denotes an unconfirmed custom-voice preview.
+ voice_id TEXT,
+ -- Creator-entered title, gender, and description are frozen before audio generation starts.
+ name TEXT NOT NULL, gender TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL,
+ -- The sentence spoken by the configured audio model, derived from the frozen voice metadata.
+ sample_text TEXT NOT NULL,
+ -- Durable queue state, progress, result URL, and diagnostic exposed by the settings preview UI.
+ status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT '', audio_url TEXT, error_message TEXT,
+ created_at TEXT NOT NULL, completed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS interactive_games (
+ id TEXT PRIMARY KEY,
+ -- Creator-visible game title, used in the workbench and packaged runtime manifest.
+ name TEXT NOT NULL,
+ -- Original creator input retained as the source for an expansion retry.
+ script TEXT NOT NULL,
+ -- Expanded narrative used as the only source for video-node graph planning.
+ expanded_script TEXT NOT NULL DEFAULT '',
+ -- Target runtime selected before a graph is created.
+ platform TEXT NOT NULL,
+ -- Visual direction shared by every reusable asset and video node.
+ style TEXT NOT NULL,
+ -- Exact number of terminal nodes that represent player success.
+ success_ending_count INTEGER NOT NULL,
+ -- Exact number of terminal nodes that represent player failure.
+ failure_ending_count INTEGER NOT NULL,
+ -- Inclusive minimum number of choices displayed after a playable node.
+ branch_min INTEGER NOT NULL,
+ -- Inclusive maximum number of choices displayed after a playable node.
+ branch_max INTEGER NOT NULL,
+ -- Inclusive minimum duration requested for each generated node video.
+ node_duration_min INTEGER NOT NULL,
+ -- Inclusive maximum duration requested for each generated node video.
+ node_duration_max INTEGER NOT NULL,
+ -- Language model selected for expansion and graph planning.
+ language_model TEXT NOT NULL,
+ -- Image model retained for the next asset-generation stage.
+ multimodal_model TEXT NOT NULL,
+ -- Video model retained for node-video generation.
+ video_model TEXT NOT NULL DEFAULT 'doubao-seedance-2.0',
+ -- Per-material-type image-generation instructions shared by every material in the workbench.
+ asset_public_prompts_json TEXT NOT NULL DEFAULT '{}',
+ -- Resolution supplied to node prompts and the video provider.
+ resolution TEXT NOT NULL DEFAULT '720p',
+ -- Whether the expansion provider may use its built-in web-search capability.
+ enable_web_search INTEGER NOT NULL DEFAULT 0,
+ -- Lower bound for the expanded story text requested from the language model.
+ expanded_script_min_chars INTEGER NOT NULL DEFAULT 5000,
+ -- Upper bound for the expanded story text requested from the language model.
+ expanded_script_max_chars INTEGER NOT NULL DEFAULT 10000,
+ -- Maximum source-text length stored in any one playable video node.
+ node_script_max_chars INTEGER NOT NULL DEFAULT 400,
+ -- Aggregate generation state shown in the game list and workbench header.
+ status TEXT NOT NULL,
+ -- Compatibility snapshot of reusable assets kept alongside normalized rows.
+ assets_json TEXT NOT NULL DEFAULT '[]',
+ -- Compatibility snapshot of graph nodes kept alongside normalized rows.
+ nodes_json TEXT NOT NULL DEFAULT '[]',
+ -- Compatibility snapshot of graph choice edges kept alongside normalized rows.
+ edges_json TEXT NOT NULL DEFAULT '[]',
+ -- Legacy aggregate history reserved for runtime and packaging compatibility.
+ historical_videos_json TEXT NOT NULL DEFAULT '[]',
+ -- Creation timestamp used for list ordering.
+ created_at TEXT NOT NULL,
+ -- Timestamp updated by any game-level configuration or graph change.
+ updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS game_assets (
+ id TEXT PRIMARY KEY, game_id TEXT NOT NULL,
+ -- character, scene, prop, placeholder, or cover; determines its workbench grouping and allowable video references.
+ type TEXT NOT NULL,
+ -- Creator-visible material name, retained across graph edits and used in video-reference selectors.
+ name TEXT NOT NULL,
+ -- Editable visual prompt used as the source text for each independent image-generation task.
+ prompt TEXT NOT NULL,
+ -- Optional catalog voice selected for a character; passed as an audio reference by supporting video models.
+ voice_id TEXT,
+ -- Latest creator-uploaded or generated image used as a video reference or a first/last frame.
+ image_url TEXT,
+ -- Earlier image results retained for comparison and restoration in the material workbench.
+ image_history_json TEXT NOT NULL DEFAULT '[]',
+ -- Alternate poses, outfits, or states, each with their own image history and generation state.
+ variants_json TEXT NOT NULL DEFAULT '[]',
+ -- Cover or placeholder output settings and selected reference material IDs for durable image tasks.
+ metadata_json TEXT NOT NULL DEFAULT '{}',
+ -- Material generation state displayed by the workbench card.
+ status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS game_nodes (
+ id TEXT PRIMARY KEY, game_id TEXT NOT NULL, node_type TEXT NOT NULL, title TEXT NOT NULL, original_text TEXT NOT NULL,
+	-- Editable video-generation prompt saved independently from the original story text.
+	prompt TEXT NOT NULL,
+	-- Rich prompt nodes retain each creator-placed @ reference chip across editor refreshes.
+	prompt_rich_json TEXT NOT NULL DEFAULT '[]',
+	video_url TEXT,
+	-- Completed history entry explicitly selected for this node; the editor preview and game runtime keep using it until the creator changes it.
+	selected_video_id TEXT,
+	duration_seconds INTEGER NOT NULL, status TEXT NOT NULL, position_x INTEGER NOT NULL DEFAULT 0, position_y INTEGER NOT NULL DEFAULT 0,
+ -- Selected reusable game-material IDs supplied to the video provider as reference images when their URLs are configured.
+ reference_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+ -- Optional first and last frame material selections, stored as {"first":{"asset_id":...},"last":{"asset_id":...}}.
+ first_last_frames_json TEXT NOT NULL DEFAULT '{}',
+ -- Generated placeholder material used to establish this node's composition before video generation.
+ placeholder_asset_id TEXT,
+ -- Scene background selected while editing the node's placeholder composition.
+ placeholder_scene_asset_id TEXT,
+ -- Character placement boxes and notes used to recreate the placeholder composition after refresh.
+ placeholder_placements_json TEXT NOT NULL DEFAULT '[]',
+ video_history_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS game_edges (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, source_node_id TEXT NOT NULL, target_node_id TEXT NOT NULL, option_text TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 1, conditions_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE, FOREIGN KEY (source_node_id) REFERENCES game_nodes(id) ON DELETE CASCADE, FOREIGN KEY (target_node_id) REFERENCES game_nodes(id) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS game_tasks (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, type TEXT NOT NULL, resource_id TEXT, status TEXT NOT NULL, input_snapshot_json TEXT, result_json TEXT, error_message TEXT, progress INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT '', poll_attempts INTEGER NOT NULL DEFAULT 0, poll_lease_token TEXT, poll_lease_until TEXT, next_poll_at TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE);
-CREATE TABLE IF NOT EXISTS game_sessions (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, current_node_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', path_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE, FOREIGN KEY (current_node_id) REFERENCES game_nodes(id));
+CREATE TABLE IF NOT EXISTS game_tasks (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, type TEXT NOT NULL, resource_id TEXT, status TEXT NOT NULL, input_snapshot_json TEXT, result_json TEXT, error_message TEXT, progress INTEGER NOT NULL DEFAULT 0, stage TEXT NOT NULL DEFAULT '', poll_attempts INTEGER NOT NULL DEFAULT 0, poll_lease_token TEXT, poll_lease_until TEXT, next_poll_at TEXT, provider_task_id TEXT, created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS game_sessions (id TEXT PRIMARY KEY, game_id TEXT NOT NULL, current_node_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', path_json TEXT NOT NULL DEFAULT '[]',
+-- State flags written by earlier choices and evaluated by conditional choices after later DAG merges.
+state_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE, FOREIGN KEY (current_node_id) REFERENCES game_nodes(id));
 CREATE TABLE IF NOT EXISTS game_choice_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, game_id TEXT NOT NULL, source_node_id TEXT NOT NULL, edge_id TEXT NOT NULL, target_node_id TEXT NOT NULL, option_text TEXT NOT NULL, selected_at TEXT NOT NULL, FOREIGN KEY (session_id) REFERENCES game_sessions(id) ON DELETE CASCADE, FOREIGN KEY (game_id) REFERENCES interactive_games(id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS idx_drama_assets_drama_id ON drama_assets(drama_id);
 CREATE INDEX IF NOT EXISTS idx_drama_shots_drama_id ON drama_shots(drama_id);
 CREATE INDEX IF NOT EXISTS idx_generation_tasks_drama_id ON generation_tasks(drama_id);
+CREATE INDEX IF NOT EXISTS idx_voice_generation_tasks_status ON voice_generation_tasks(status,created_at);
 CREATE INDEX IF NOT EXISTS idx_game_assets_game_id ON game_assets(game_id);
 CREATE INDEX IF NOT EXISTS idx_game_nodes_game_id ON game_nodes(game_id);
 CREATE INDEX IF NOT EXISTS idx_game_edges_game_id ON game_edges(game_id);

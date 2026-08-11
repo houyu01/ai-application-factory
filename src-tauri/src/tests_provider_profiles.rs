@@ -111,3 +111,27 @@ fn model_option_edits_stay_with_the_requested_provider() {
     );
     fs::remove_dir_all(root).expect("remove test data");
 }
+
+#[test]
+fn ark_audio_candidate_defaults_to_seed_tts_two_v3() {
+    let (repository, root) = test_repository();
+
+    let candidate = repository
+        .model_config_candidate(&Map::from_iter([
+            ("kind".to_owned(), json!("audio")),
+            ("provider".to_owned(), json!("ark")),
+            ("app_id".to_owned(), json!("speech-app")),
+            ("api_key".to_owned(), json!("speech-token")),
+        ]))
+        .expect("Seed-TTS 2.0 candidate");
+
+    assert_eq!(
+        candidate["endpoint"],
+        "https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional"
+    );
+    assert_eq!(candidate["model"], "seed-tts-2.0");
+    assert!(candidate.get("app_id").is_none());
+    assert!(candidate.get("resource_id").is_none());
+    assert!(candidate.get("voice").is_none());
+    fs::remove_dir_all(root).expect("remove test data");
+}

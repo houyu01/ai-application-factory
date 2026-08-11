@@ -21,7 +21,7 @@ const profiles: Record<ModelKind, Record<Provider, Partial<ModelSettings>>> = {
     tencent: { endpoint: 'https://mps.tencentcloudapi.com', create_url: 'https://mps.tencentcloudapi.com', query_url: 'https://mps.tencentcloudapi.com', region: 'ap-guangzhou', model: 'Hunyuan:1.5', models: ['Hunyuan:1.5'] },
   },
   audio: {
-    ark: { endpoint: '', create_url: 'https://openspeech.bytedance.com/api/v1/tts_async/submit', query_url: 'https://openspeech.bytedance.com/api/v1/tts_async/query', resource_id: 'volc.tts_async.default', voice: 'BV001_streaming', model: 'volc.tts_async.default', models: ['volc.tts_async.default'] },
+    ark: { endpoint: 'https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional', model: 'seed-tts-2.0', models: ['seed-tts-2.0'] },
     dashscope: { endpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-flash', voice: 'Cherry', models: ['qwen3-tts-flash', 'qwen3-tts-instruct-flash'] },
     tencent: { endpoint: 'https://mps.tencentcloudapi.com', region: 'ap-guangzhou', model: 'mps-sync-dubbing', voice: '', models: ['mps-sync-dubbing'] },
   },

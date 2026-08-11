@@ -5,6 +5,7 @@ use serde_json::{json, Map, Value};
 use crate::{
     error::{AppError, AppResult},
     value::string,
+    volcengine_tts::{apply_seed_tts_two_defaults, HTTP_ENDPOINT, RESOURCE_ID},
 };
 
 use super::Repository;
@@ -48,6 +49,9 @@ impl Repository {
                 continue;
             }
             stored.insert(key.clone(), value.clone());
+        }
+        if kind == "audio" && provider == "ark" {
+            apply_seed_tts_two_defaults(&mut stored);
         }
         for (key, value) in provider_defaults(&kind, &provider) {
             if !stored.contains_key(key) || string(&stored, key, "").is_empty() {
@@ -302,15 +306,7 @@ fn model_defaults(kind: &str) -> (&'static str, Vec<String>) {
                 "Hunyuan:1.5".into(),
             ],
         ),
-        _ => (
-            "volc.tts_async.default",
-            vec![
-                "volc.tts_async.default".into(),
-                "qwen3-tts-flash".into(),
-                "qwen3-tts-instruct-flash".into(),
-                "mps-sync-dubbing".into(),
-            ],
-        ),
+        _ => (RESOURCE_ID, vec![RESOURCE_ID.into()]),
     }
 }
 
@@ -325,7 +321,10 @@ fn provider_defaults(kind: &str, provider: &str) -> Vec<(&'static str, &'static 
         ("video", "ark") => vec![("create_url", "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks"), ("query_url", "https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/{id}"), ("model", "doubao-seedance-2.0")],
         ("video", "dashscope") => vec![("create_url", "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis"), ("query_url", "https://dashscope.aliyuncs.com/api/v1/tasks/{id}"), ("model", "wan2.6-r2v-flash")],
         ("video", "tencent") => vec![("endpoint", "https://mps.tencentcloudapi.com"), ("create_url", "https://mps.tencentcloudapi.com"), ("query_url", "https://mps.tencentcloudapi.com"), ("model", "Hunyuan:1.5"), ("region", "ap-guangzhou")],
-        ("audio", "ark") => vec![("create_url", "https://openspeech.bytedance.com/api/v1/tts_async/submit"), ("query_url", "https://openspeech.bytedance.com/api/v1/tts_async/query"), ("model", "volc.tts_async.default"), ("resource_id", "volc.tts_async.default"), ("voice", "BV001_streaming")],
+        ("audio", "ark") => vec![
+            ("endpoint", HTTP_ENDPOINT),
+            ("model", RESOURCE_ID),
+        ],
         ("audio", "dashscope") => vec![("endpoint", "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"), ("model", "qwen3-tts-flash"), ("voice", "Cherry")],
         ("audio", "tencent") => vec![("endpoint", "https://mps.tencentcloudapi.com"), ("model", "mps-sync-dubbing"), ("region", "ap-guangzhou")],
         _ => Vec::new(),

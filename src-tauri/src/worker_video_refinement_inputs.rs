@@ -11,7 +11,7 @@ impl DurableWorker {
         project: &Value,
         shot: &Value,
         refinement: &Value,
-    ) -> AppResult<(String, Vec<String>)> {
+    ) -> AppResult<(String, Vec<String>, Vec<Option<String>>)> {
         let original_prompt = refinement["original_prompt"]
             .as_str()
             .unwrap_or_default()

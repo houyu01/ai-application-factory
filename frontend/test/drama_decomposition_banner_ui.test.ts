@@ -32,3 +32,10 @@ test('storyboard decomposition retains its existing step title', () => {
     '第 3/4 步：拆解分镜',
   );
 });
+
+test('storyboard decomposition exposes the durable cumulative received-character count', () => {
+  assert.equal(
+    generationCopy(project, task('script_decomposition', 68, '第011至20集分镜骨架（第2/3批），累计已接收16031字（本批8000字）')).receivedChars,
+    16031,
+  );
+});

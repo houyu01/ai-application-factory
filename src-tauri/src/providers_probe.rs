@@ -9,9 +9,6 @@ use crate::{
 };
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{json, Map, Value};
-use std::{thread, time::Duration};
-use url::form_urlencoded;
-use uuid::Uuid;
 
 impl ProviderClient {
     /// Send the smallest real request for a candidate model configuration before it can replace a working one.
@@ -106,6 +103,7 @@ impl ProviderClient {
             },
             3,
             &references,
+            &[],
             None,
             Some(model),
         ) {
@@ -146,83 +144,19 @@ impl ProviderClient {
     }
 
     fn probe_ark_audio(&self, config: &Map<String, Value>) -> AppResult<()> {
-        let key = api_key(config, "音频")?;
-        let app_id = required(config, "app_id", "火山引擎音频模型需要配置 AppID")?;
-        let resource_id = required(
+        self.synthesize_ark_audio_bytes(
             config,
-            "resource_id",
-            "火山引擎音频模型需要配置 Resource-Id",
+            "模型连接测试",
+            crate::volcengine_tts::DEFAULT_FEMALE_SPEAKER,
+            "这是模型连接测试，请使用自然、清晰的中文女声。",
         )?;
-        let voice = required(config, "voice", "火山引擎音频模型需要配置 Voice Type")?;
-        let create = endpoint_or(
+        self.synthesize_ark_audio_bytes(
             config,
-            "create_url",
-            "https://openspeech.bytedance.com/api/v1/tts_async/submit",
-        );
-        let query = endpoint_or(
-            config,
-            "query_url",
-            "https://openspeech.bytedance.com/api/v1/tts_async/query",
-        );
-        let created = self
-            .client
-            .post(create)
-            .header(AUTHORIZATION, format!("Bearer; {key}"))
-            .header("Resource-Id", resource_id)
-            .json(&json!({"appid":app_id,"reqid":Uuid::new_v4().simple().to_string(),"text":"模型连接测试","format":"mp3","voice_type":voice}))
-            .send()
-            .map_err(|error| AppError::External(format!("火山引擎音频请求失败：{error}")))?
-            .error_for_status()
-            .map_err(|error| AppError::External(format!("火山引擎音频请求失败：{error}")))?
-            .json::<Value>()
-            .map_err(|error| AppError::External(format!("火山引擎音频响应无效：{error}")))?;
-        let task_id = created["task_id"]
-            .as_str()
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| AppError::External("火山引擎音频模型没有返回任务 ID".to_owned()))?;
-        for _ in 0..90 {
-            let mut serializer = form_urlencoded::Serializer::new(String::new());
-            serializer
-                .append_pair("appid", app_id)
-                .append_pair("task_id", task_id);
-            let response = self
-                .client
-                .get(format!(
-                    "{}?{}",
-                    query.trim_end_matches('?'),
-                    serializer.finish()
-                ))
-                .header(AUTHORIZATION, format!("Bearer; {key}"))
-                .header("Resource-Id", resource_id)
-                .send()
-                .map_err(|error| AppError::External(format!("火山引擎音频请求失败：{error}")))?
-                .error_for_status()
-                .map_err(|error| AppError::External(format!("火山引擎音频请求失败：{error}")))?
-                .json::<Value>()
-                .map_err(|error| AppError::External(format!("火山引擎音频响应无效：{error}")))?;
-            match response["task_status"].as_str() {
-                Some("1")
-                    if response["audio_url"]
-                        .as_str()
-                        .is_some_and(|url| !url.is_empty()) =>
-                {
-                    return Ok(())
-                }
-                Some("1") => {
-                    return Err(AppError::External(
-                        "火山引擎音频任务成功但没有返回 audio_url".to_owned(),
-                    ))
-                }
-                Some("2") => {
-                    return Err(AppError::External(format!(
-                        "火山引擎音频任务失败：{}",
-                        response["message"].as_str().unwrap_or("未知错误")
-                    )))
-                }
-                _ => thread::sleep(Duration::from_secs(1)),
-            }
-        }
-        Err(AppError::External("火山引擎音频任务超时".to_owned()))
+            "模型连接测试",
+            crate::volcengine_tts::DEFAULT_MALE_SPEAKER,
+            "这是模型连接测试，请使用自然、清晰的中文男声。",
+        )?;
+        Ok(())
     }
 
     fn probe_dashscope_audio(&self, config: &Map<String, Value>, model: &str) -> AppResult<()> {

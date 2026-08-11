@@ -45,11 +45,21 @@ function expandedScreenplay(project: ApiProject): string {
   return project.expanded_script || '';
 }
 
+/** Read the durable cumulative stream count that the storyboard worker writes into its stage. */
+function storyboardReceivedChars(task: GenerationTask): number | undefined {
+  if (task.type !== 'script_decomposition') return undefined;
+  const value = task.stage?.match(/累计已接收\s*([\d,]+)\s*字/)?.[1];
+  if (!value) return undefined;
+  const chars = Number(value.replaceAll(',', ''));
+  return Number.isFinite(chars) && chars >= 0 ? chars : undefined;
+}
+
 export function generationCopy(project: ApiProject, task: GenerationTask) {
   if (task.type === 'script_expansion') {
     return {
       step: 1,
       progress: taskProgress(task),
+      receivedChars: undefined,
       title: EXPANDING_SCREENPLAY_TITLE,
       detail: task.error_message?.trim() || task.stage || '正在基于已保存的剧本继续扩写。',
     };
@@ -60,6 +70,7 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
   return {
     step,
     progress: taskProgress(task),
+    receivedChars: storyboardReceivedChars(task),
     title: step === 1
       ? EXPANDING_SCREENPLAY_TITLE
       : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}`,
@@ -72,10 +83,10 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
 }
 
 function progressMarkup() {
-  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div>`;
+  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><div class="drama-decomposition-progress-details"><span data-drama-decomposition-received hidden></span><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div></div>`;
 }
 
-function syncProgressIndicator(banner: HTMLElement, step: number, progress: number, failed: boolean) {
+function syncProgressIndicator(banner: HTMLElement, step: number, progress: number, failed: boolean, receivedChars?: number) {
   const indicator = banner.querySelector<HTMLElement>('[data-drama-decomposition-progress]');
   if (!indicator) return;
   indicator.hidden = failed;
@@ -93,6 +104,11 @@ function syncProgressIndicator(banner: HTMLElement, step: number, progress: numb
     indicator.querySelector<HTMLElement>('[data-drama-decomposition-progress-label]'),
     `当前进度 ${progress}%`,
   );
+  const received = indicator.querySelector<HTMLElement>('[data-drama-decomposition-received]');
+  if (received) {
+    received.hidden = receivedChars === undefined;
+    if (receivedChars !== undefined) setTextIfChanged(received, `骨架已接收 ${receivedChars.toLocaleString()} 字`);
+  }
 }
 
 /** Synchronize the detail-page banner with the newest persisted screenplay task. */
@@ -125,7 +141,7 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
     current.querySelector<HTMLElement>('.generation-spinner')?.toggleAttribute('hidden', failed);
     setTextIfChanged(title, titleText);
     setTextIfChanged(bannerDetail, detailText);
-    syncProgressIndicator(current, copy.step, copy.progress, failed);
+    syncProgressIndicator(current, copy.step, copy.progress, failed, copy.receivedChars);
     setTextIfChanged(preview, previewText);
     if (preview) preview.hidden = !previewText;
     if (retry) {
@@ -147,7 +163,7 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
   const retry = banner.querySelector<HTMLButtonElement>('[data-drama-retry-decomposition]');
   setTextIfChanged(title, titleText);
   setTextIfChanged(bannerDetail, detailText);
-  syncProgressIndicator(banner, copy.step, copy.progress, failed);
+  syncProgressIndicator(banner, copy.step, copy.progress, failed, copy.receivedChars);
   setTextIfChanged(preview, previewText);
   if (preview) preview.hidden = !previewText;
   if (retry && failed && onRetry) retry.onclick = () => onRetry(project!.id);

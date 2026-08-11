@@ -1,0 +1,449 @@
+/* Game-only extensions of the short-drama material rail, drawer, and dialogs. */
+
+.game-material-rail {
+  position: static;
+  top: auto;
+  right: auto;
+  align-self: start;
+  justify-self: start;
+  padding-left: 1px;
+  padding-right: 1px;
+}
+
+.game-material-rail .drama-asset-rail-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+}
+
+/* Keep the canvas immediately beside the compact material rail. */
+.game-editor-layout {
+  grid-template-columns: 87px minmax(360px, 1fr) 3px minmax(330px, 345px);
+  column-gap: 0;
+  row-gap: 18px;
+}
+
+.game-inspector {
+  margin-left: 0;
+  position: static;
+  top: auto;
+  align-self: start;
+}
+
+.game-editor-layout[data-canvas-resized='true'] {
+  grid-template-columns: 87px minmax(360px, var(--game-canvas-width)) 3px minmax(330px, 1fr);
+}
+
+.game-canvas-resizer {
+  position: relative;
+  z-index: 3;
+  align-self: stretch;
+  min-height: 620px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.game-canvas-resizer::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  left: -6px;
+  content: '';
+}
+
+.game-canvas-resizer::after {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: 1px;
+  width: 1px;
+  content: '';
+  background: transparent;
+}
+
+.game-canvas-resizer:hover::after,
+.game-editor-layout.is-canvas-resizing .game-canvas-resizer::after { background: #e99137; }
+.game-editor-layout.is-canvas-resizing { cursor: col-resize; user-select: none; }
+
+.game-material-role-icon,
+.game-material-scene-icon,
+.game-material-prop-icon,
+.game-material-frame-icon,
+.game-material-placeholder-icon,
+.game-material-cover-icon {
+  display: block;
+  box-sizing: border-box;
+}
+
+.game-material-role-icon {
+  width: 25px;
+  height: 25px;
+  background: currentColor;
+  mask: var(--character-icon-mask) center / contain no-repeat;
+  -webkit-mask: var(--character-icon-mask) center / contain no-repeat;
+}
+
+.game-material-scene-icon {
+  width: 23px;
+  height: 23px;
+  border: 2px solid currentColor;
+  background: linear-gradient(90deg, transparent 28%, currentColor 29% 35%, transparent 36% 64%, currentColor 65% 71%, transparent 72%), linear-gradient(transparent 28%, currentColor 29% 35%, transparent 36% 64%, currentColor 65% 71%, transparent 72%);
+}
+
+.game-material-prop-icon {
+  width: 21px;
+  height: 21px;
+  border: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.game-material-frame-icon {
+  width: 25px;
+  height: 25px;
+  border: 2px solid currentColor;
+  box-shadow: inset 0 0 0 5px #fff, inset 0 0 0 8px currentColor;
+}
+
+.game-material-placeholder-icon {
+  width: 25px;
+  height: 16px;
+  border: 2px solid currentColor;
+  transform: skew(-27deg);
+}
+
+.game-material-cover-icon {
+  position: relative;
+  width: 26px;
+  height: 23px;
+  border: 2px solid currentColor;
+  border-radius: 4px;
+}
+
+.game-material-cover-icon::before,
+.game-material-cover-icon::after {
+  content: '';
+  position: absolute;
+}
+
+.game-material-cover-icon::before {
+  left: 4px;
+  top: 4px;
+  width: 5px;
+  height: 5px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.game-material-cover-icon::after {
+  left: 4px;
+  right: 3px;
+  bottom: 3px;
+  height: 9px;
+  border-left: 2px solid currentColor;
+  border-top: 2px solid currentColor;
+  transform: skewY(-42deg);
+}
+
+.game-material-sheet-backdrop {
+  z-index: 90;
+}
+
+.game-material-card .drama-asset-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.game-material-card .drama-asset-placeholder img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-material-card .drama-asset-prompt {
+  min-height: 0;
+  margin-bottom: 8px;
+}
+
+.game-material-reference-state {
+  min-height: 0 !important;
+  margin: 0 !important;
+  color: #8b8d92 !important;
+}
+
+.game-material-upload {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0 !important;
+  cursor: pointer;
+}
+
+.game-material-upload .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.game-node-media-shortcuts {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.game-material-node-picker {
+  display: block;
+  margin: 18px 0;
+  font-weight: 700;
+}
+
+.game-material-node-picker select,
+.drama-frame-actions select,
+.game-cover-reference-field input {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #dededc;
+  border-radius: 8px;
+  background: #fff;
+  outline: 0;
+}
+
+.drama-frame-preview img,
+.game-placeholder-backdrop .drama-placeholder-canvas img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-placeholder-backdrop .drama-placeholder-canvas {
+  display: grid;
+  place-items: center;
+  color: #aeb2bd;
+}
+
+.game-placeholder-backdrop .drama-placeholder-canvas span {
+  padding: 20px;
+  text-align: center;
+}
+
+.game-cover-modal .drama-cover-preview-empty {
+  overflow: hidden;
+}
+
+.game-cover-modal .drama-cover-preview-empty img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-cover-reference-field {
+  display: block;
+  margin-top: 16px;
+}
+
+.game-material-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #eee;
+}
+
+.game-material-group .panel-title h3 { margin: 0; font-size: 13px; }
+.game-assets-panel button.asset-row { width: 100%; color: inherit; text-align: left; }
+.game-assets-panel .asset-row small { display: block; clear: both; padding-top: 5px; color: #8a8d92; font-size: 11px; }
+
+/* The game graph is a direct-manipulation DAG canvas rather than a scroll-only preview. */
+.game-canvas-wrap {
+  display: flex;
+  flex-direction: column;
+  height: min(72vh, 760px);
+  min-height: 620px;
+  overflow: hidden;
+}
+
+.game-graph-canvas {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.game-graph-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e7e7e4;
+  background: #fff;
+}
+
+.game-graph-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.game-graph-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.game-graph-zoom-controls button,
+.game-graph-toolbar-actions > button {
+  min-height: 30px;
+  padding: 4px 9px;
+}
+
+.game-graph-zoom-controls span {
+  min-width: 43px;
+  color: #707278;
+  font-size: 12px;
+  text-align: center;
+}
+
+.game-graph-help {
+  color: #8b8d92;
+  font-size: 11px;
+}
+
+.game-graph-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.game-graph-viewport.is-panning {
+  cursor: grabbing;
+}
+
+.game-graph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.game-edges {
+  pointer-events: none;
+}
+
+.game-edge-line {
+  fill: none;
+  marker-end: url(#game-edge-arrow);
+}
+
+.game-edges marker path {
+  fill: #9b9da2;
+}
+
+.game-edge-draft {
+  fill: none;
+  stroke: #e87521;
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+}
+
+.game-edge-label {
+  cursor: pointer;
+}
+
+.game-node {
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.game-node:hover {
+  transform: none;
+}
+
+.game-node.is-dragging {
+  cursor: grabbing;
+  z-index: 8;
+  box-shadow: 0 12px 28px #00000024;
+}
+
+.game-node-link-handle {
+  position: absolute;
+  z-index: 2;
+  right: -11px;
+  top: 50%;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid #e87521;
+  border-radius: 50%;
+  background: #fff;
+  color: #e87521;
+  cursor: crosshair;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.game-node-link-handle:hover {
+  background: #fff4eb;
+}
+
+:root[data-theme='dark'] .game-material-node-picker select,
+:root[data-theme='dark'] .drama-frame-actions select,
+:root[data-theme='dark'] .game-cover-reference-field input {
+  border-color: #454951;
+  background: #121417;
+  color: #f2f3f5;
+}
+
+:root[data-theme='dark'] .game-graph-toolbar {
+  border-color: #34373d;
+  background: #1b1d21;
+}
+
+:root[data-theme='dark'] .game-node-link-handle {
+  background: #1b1d21;
+}
+
+@media (max-width: 1250px) {
+  .game-material-rail { top: 82px; grid-row: span 2; }
+  .game-editor-layout { grid-template-columns: 79px minmax(440px, 1fr); }
+  .game-editor-layout[data-canvas-resized='true'] { grid-template-columns: 79px minmax(440px, 1fr); }
+  .game-inspector { grid-column: span 2; position: static; max-height: none; margin-left: 0; }
+  .game-canvas-resizer { display: none; }
+}
+
+@media (max-width: 760px) {
+  .game-editor-layout { grid-template-columns: 1fr; }
+  .game-material-rail {
+    position: static;
+    display: grid;
+    grid-row: auto;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    width: 100%;
+    padding: 8px;
+    border-radius: 16px;
+  }
+  .game-material-rail .drama-asset-rail-item { min-height: 60px; font-size: 10px; }
+  .game-material-rail .drama-asset-rail-icon { width: 24px; height: 24px; }
+  .game-material-scene-icon { width: 18px; height: 18px; }
+  .game-material-prop-icon { width: 17px; height: 17px; }
+  .game-material-placeholder-icon { width: 20px; height: 13px; }
+  .game-inspector { grid-column: auto; margin-left: 0; }
+  .game-canvas-resizer { display: none; }
+  .game-node-media-shortcuts { flex-wrap: wrap; }
+  .game-canvas-wrap { min-height: 460px; height: 62vh; }
+  .game-graph-help { display: none; }
+}

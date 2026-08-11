@@ -83,7 +83,7 @@ impl DesktopService {
         )
     }
 
-    fn worker_provider_cancel(&self, provider_task_id: &str) -> AppResult<()> {
+    pub(crate) fn worker_provider_cancel(&self, provider_task_id: &str) -> AppResult<()> {
         // Constructing a short-lived provider client prevents stale settings from being retained after a settings edit.
         crate::providers::ProviderClient::new(self.repository.clone(), self.media.clone())?
             .cancel_video(provider_task_id)

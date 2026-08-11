@@ -1,0 +1,155 @@
+.drama-history-success-actions { grid-template-areas: 'use refine' 'delete download'; }
+
+.drama-history-success-actions .drama-history-use-version {
+  display: inline-grid;
+  place-items: center;
+  grid-area: use;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #85878d;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.drama-history-success-actions .drama-history-use-version:hover { background: #f0f1f2; color: #5d6066; }
+.drama-history-success-actions .drama-history-use-version:disabled { cursor: default; background: #e9f8ef; color: #16945b; opacity: 1; }
+:root[data-theme='dark'] .drama-history-success-actions .drama-history-use-version:hover { background: #30333a; color: #d8dbe2; }
+:root[data-theme='dark'] .drama-history-success-actions .drama-history-use-version:disabled { background: #163326; color: #7bd5a4; }
+.drama-video-export-modal {
+  width: min(820px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.drama-video-export-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 26px 32px 16px;
+  border-bottom: 1px solid #ececea;
+}
+
+.drama-video-export-head h2 { margin: 0; font-size: 22px; }
+.drama-video-export-head p { margin: 7px 0 0; color: #74767b; font-size: 13px; line-height: 1.55; }
+.drama-video-export-head .close { flex: 0 0 auto; }
+.drama-video-export-form { padding: 20px 32px 8px; }
+
+.drama-video-export-format {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+}
+
+.drama-video-export-format-label {
+  margin-right: 2px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.drama-video-export-format-value { font-size: 13px; }
+
+.drama-video-export-selection-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.drama-video-export-selection-head h3 { margin: 0; font-size: 16px; }
+.drama-video-export-selection-head p { margin: 5px 0 0; color: #85878d; font-size: 12px; line-height: 1.5; }
+.drama-video-export-selection-head > span { padding-top: 3px; color: #85878d; font-size: 12px; white-space: nowrap; }
+
+.drama-video-export-selections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 310px;
+  margin-top: 14px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.drama-video-export-shot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 175px;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid #e5e5e2;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.drama-video-export-shot-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drama-video-export-shot select {
+  box-sizing: border-box;
+  width: 100%;
+  height: 34px;
+  border: 1px solid #dadbd8;
+  border-radius: 7px;
+  background: #fff;
+  color: inherit;
+  padding: 0 8px;
+  font: inherit;
+}
+
+.drama-video-export-shot.missing {
+  border-style: dashed;
+  color: #6e7075;
+}
+
+.drama-video-export-shot.missing select { color: #6e7075; }
+.drama-video-export-empty { margin: 8px 0; padding: 22px; border: 1px dashed #dededb; border-radius: 9px; color: #85878d; text-align: center; }
+.drama-video-export-error { margin: 14px 0 0; padding: 9px 11px; border: 1px solid #f1b7bd; border-radius: 8px; background: #fff1f2; color: #b43847; font-size: 12px; }
+.drama-video-export-progress { padding: 30px 32px 16px; }
+.drama-video-export-progress-copy { display: flex; justify-content: space-between; gap: 16px; font-size: 13px; }
+.drama-video-export-progress-copy span { color: #74767b; text-align: right; }
+.drama-video-export-progress progress { display: block; width: 100%; height: 10px; margin-top: 16px; accent-color: #df7b25; }
+.drama-video-export-progress > span { display: block; margin-top: 7px; color: #74767b; font-size: 12px; text-align: right; }
+.drama-video-export-actions { margin: 0; padding: 18px 32px 24px; border-top: 1px solid #ececea; }
+.drama-video-export-result-link { display: block; margin-top: 15px; color: #b65e13; font-size: 12px; text-align: center; text-decoration: underline; }
+
+:root[data-theme='dark'] .drama-video-export-head,
+:root[data-theme='dark'] .drama-video-export-actions { border-color: #34373d; }
+
+:root[data-theme='dark'] .drama-video-export-head p,
+:root[data-theme='dark'] .drama-video-export-selection-head p,
+:root[data-theme='dark'] .drama-video-export-selection-head > span,
+:root[data-theme='dark'] .drama-video-export-progress-copy span,
+:root[data-theme='dark'] .drama-video-export-progress > span { color: #adb1ba; }
+
+:root[data-theme='dark'] .drama-video-export-shot { border-color: #41454c; background: #191b1f; }
+:root[data-theme='dark'] .drama-video-export-shot select { border-color: #454951; background: #121417; color: #f2f3f5; }
+:root[data-theme='dark'] .drama-video-export-shot.missing { color: #adb1ba; }
+:root[data-theme='dark'] .drama-video-export-shot.missing select { color: #adb1ba; }
+:root[data-theme='dark'] .drama-video-export-empty { border-color: #454951; color: #adb1ba; }
+:root[data-theme='dark'] .drama-video-export-error { border-color: #7e414b; background: #351f25; color: #ffb5bd; }
+
+@media (max-width: 640px) {
+  .drama-video-export-head,
+  .drama-video-export-form,
+  .drama-video-export-progress,
+  .drama-video-export-actions { padding-left: 20px; padding-right: 20px; }
+
+  .drama-video-export-format { gap: 10px 14px; }
+  .drama-video-export-format-label { width: 100%; }
+  .drama-video-export-shot { grid-template-columns: 1fr; }
+  .drama-video-export-progress-copy { flex-direction: column; gap: 4px; }
+  .drama-video-export-progress-copy span { text-align: left; }
+}

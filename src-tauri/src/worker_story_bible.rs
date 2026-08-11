@@ -1,6 +1,9 @@
 //! Story-bible generation with durable previews for the long-drama bootstrap flow.
 
-use std::time::{Duration, Instant};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde_json::{json, Map, Value};
 
@@ -9,6 +12,7 @@ use crate::{
     skills,
 };
 
+use super::super::retry::immediate_language_retry_delay;
 use super::{support::*, DurableWorker};
 
 const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
@@ -28,33 +32,58 @@ impl DurableWorker {
     ) -> AppResult<String> {
         let episodes = target_episode_count(project)?;
         let prompt = story_bible_prompt(project, source, research)?;
-        let mut preview = String::new();
-        let mut saved_bytes = 0;
-        let mut last_saved = Instant::now() - PREVIEW_WRITE_INTERVAL;
-        snapshot.insert("story_bible_preview".to_owned(), json!(preview));
-        self.repository
-            .update_drama_task_snapshot(task_id, Value::Object(snapshot.clone()))?;
-        let streamed = self.providers.complete_with_web_search_stream(
-            "language",
-            model,
-            &story_bible_system()?,
-            &prompt,
-            web,
-            |delta| {
-                preview.push_str(delta);
-                let due = preview.len().saturating_sub(saved_bytes) >= PREVIEW_WRITE_MIN_BYTES
-                    || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
-                if due {
+        let streamed = 'request: loop {
+            for attempt in 1..=3 {
+                let mut preview = String::new();
+                let mut saved_bytes = 0;
+                let mut last_saved = Instant::now() - PREVIEW_WRITE_INTERVAL;
+                snapshot.insert("story_bible_preview".to_owned(), json!(preview));
+                self.repository
+                    .update_drama_task_snapshot(task_id, Value::Object(snapshot.clone()))?;
+                let response = self.providers.complete_with_web_search_stream(
+                    "language",
+                    model,
+                    &story_bible_system()?,
+                    &prompt,
+                    web,
+                    |delta| {
+                        preview.push_str(delta);
+                        let due = preview.len().saturating_sub(saved_bytes)
+                            >= PREVIEW_WRITE_MIN_BYTES
+                            || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
+                        if due {
+                            self.persist_story_bible_preview(
+                                task_id, episodes, snapshot, &preview,
+                            )?;
+                            saved_bytes = preview.len();
+                            last_saved = Instant::now();
+                        }
+                        Ok(())
+                    },
+                );
+                if saved_bytes != preview.len() {
                     self.persist_story_bible_preview(task_id, episodes, snapshot, &preview)?;
-                    saved_bytes = preview.len();
-                    last_saved = Instant::now();
                 }
-                Ok(())
-            },
-        );
-        if saved_bytes != preview.len() {
-            self.persist_story_bible_preview(task_id, episodes, snapshot, &preview)?;
-        }
+                match response {
+                    Ok(value) => break 'request Ok(value),
+                    Err(error) => {
+                        let Some(delay) = immediate_language_retry_delay(&error, attempt) else {
+                            break 'request Err(error);
+                        };
+                        self.repository.update_drama_task_progress(
+                            task_id,
+                            8,
+                            &format!(
+                                "故事圣经连接短暂异常，{} 秒后立即重试（{}/3）",
+                                delay.as_secs(),
+                                attempt + 1
+                            ),
+                        )?;
+                        thread::sleep(delay);
+                    }
+                }
+            }
+        };
         streamed
             .map(|value| clean(&value.unwrap_or_default()).if_empty(source))
             .map_err(story_bible_error)
@@ -107,7 +136,12 @@ fn story_bible_prompt(project: &Value, source: &str, research: &str) -> AppResul
         "story_bible_generator",
         json!({"premise":source,"expanded_concept":premise["instruction"],"episode_count":episodes,"format_requirements":format}),
     )?;
-    Ok(format!("请为长篇短剧扩写建立紧凑故事圣经和分集推进表。保留原稿中的明确人物、事件、设定和情感走向；补齐连续的冲突、反转、伏笔和结局，不要写正文剧本。\n{format}\n联网同类框架研究（只可借鉴抽象叙事结构，禁止复写作品内容）：\n{research}\n创意扩写技能：{}\n故事圣经技能：{}\n原始剧本：\n{source}", premise["instruction"].as_str().unwrap_or_default(), bible["instruction"].as_str().unwrap_or_default()))
+    let research_context = if crate::value::bool_value(&project["enable_web_search"]) {
+        format!("联网同类框架研究（只可借鉴抽象叙事结构，禁止复写作品内容）：\n{research}")
+    } else {
+        "资料边界：仅依据原始剧本和当前请求提供的资料创作，不得访问或引用外部资料。".to_owned()
+    };
+    Ok(format!("请为长篇短剧扩写建立紧凑故事圣经和分集推进表。保留原稿中的明确人物、事件、设定和情感走向；补齐连续的冲突、反转、伏笔和结局，不要写正文剧本。\n{format}\n{research_context}\n创意扩写技能：{}\n故事圣经技能：{}\n原始剧本：\n{source}", premise["instruction"].as_str().unwrap_or_default(), bible["instruction"].as_str().unwrap_or_default()))
 }
 
 fn story_bible_system() -> AppResult<String> {
@@ -123,5 +157,39 @@ fn story_bible_error(error: AppError) -> AppError {
             "故事圣经生成超时（3 分钟内未收到完整结果），请检查语言模型连接后重新生成".to_owned(),
         ),
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::story_bible_prompt;
+
+    #[test]
+    fn story_bible_prompt_excludes_online_research_when_the_project_disabled_it() {
+        let prompt = story_bible_prompt(
+            &json!({"enable_web_search":false,"episode_count":2,"expanded_script_min_chars":500,"expanded_script_max_chars":1_000,"shot_script_max_chars":400}),
+            "林小满回到西瓜村。",
+            "",
+        )
+        .expect("prompt");
+
+        assert!(prompt.contains("资料边界：仅依据原始剧本"));
+        assert!(!prompt.contains("联网同类框架研究"));
+        assert!(!prompt.contains("web_search"));
+    }
+
+    #[test]
+    fn story_bible_prompt_includes_prepared_research_only_when_enabled() {
+        let prompt = story_bible_prompt(
+            &json!({"enable_web_search":true,"episode_count":2,"expanded_script_min_chars":500,"expanded_script_max_chars":1_000,"shot_script_max_chars":400}),
+            "林小满回到西瓜村。",
+            "【悬疑】开场保留冲突。",
+        )
+        .expect("prompt");
+
+        assert!(prompt.contains("联网同类框架研究"));
+        assert!(prompt.contains("【悬疑】开场保留冲突。"));
     }
 }

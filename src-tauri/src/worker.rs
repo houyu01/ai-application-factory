@@ -18,28 +18,50 @@ mod batch;
 mod cover;
 #[path = "worker_decomposition_assets.rs"]
 mod decomposition_assets;
+#[path = "worker_decomposition_checkpoint.rs"]
+mod decomposition_checkpoint;
 #[path = "worker_expansion.rs"]
 pub(super) mod expansion;
 #[path = "worker_game.rs"]
 mod game;
+#[path = "worker_game_asset_prompt.rs"]
+mod game_asset_prompt;
+#[path = "worker_game_cover.rs"]
+mod game_cover;
+#[path = "worker_game_placeholder.rs"]
+mod game_placeholder;
+#[path = "worker_game_video.rs"]
+mod game_video;
 #[path = "worker_lease.rs"]
 mod lease;
 #[path = "worker_long_plan.rs"]
 mod long_plan;
+#[path = "worker_long_plan_pipeline.rs"]
+mod long_plan_pipeline;
 #[path = "worker_placeholder.rs"]
 mod placeholder;
 #[path = "worker_prompt_helpers.rs"]
 mod prompt_helpers;
 #[path = "worker_queues.rs"]
 mod queues;
+#[path = "worker_retry.rs"]
+mod retry;
 #[path = "worker_text.rs"]
 mod text;
+#[path = "worker_video_export.rs"]
+mod video_export;
+#[path = "worker_video_export_zip.rs"]
+mod video_export_zip;
 #[path = "worker_video_inputs.rs"]
 mod video_inputs;
 #[path = "worker_video_reference_lock.rs"]
 mod video_reference_lock;
+#[path = "worker_video_reference_plan.rs"]
+mod video_reference_plan;
 #[path = "worker_video_refinement_inputs.rs"]
 mod video_refinement_inputs;
+#[path = "worker_voice_audio.rs"]
+mod voice_audio;
 
 /// Coordinates model-only network work around locally persisted jobs, keeping UI requests non-blocking.
 #[derive(Clone)]
@@ -81,6 +103,10 @@ impl DurableWorker {
             self.run_drama(task);
             return Ok(true);
         }
+        if let Some(task) = self.repository.claim_voice_audio_task()? {
+            self.run_voice_audio(task);
+            return Ok(true);
+        }
         let game = self.repository.claim_game_task()?;
         if let Some(task) = game {
             self.run_game(task);
@@ -118,6 +144,7 @@ impl DurableWorker {
             "placeholder_image" => self.placeholder_image(id, project, &task),
             "cover_image" => self.cover_image(id, project, &task),
             "shot_video" => self.shot_video(id, project, &task),
+            "drama_video_export" => self.export_drama_videos(id, project, &task),
             other => Err(crate::error::AppError::BadRequest(format!(
                 "未知的短剧任务类型：{other}"
             ))),
@@ -135,45 +162,6 @@ impl DurableWorker {
                 self.reflect_drama_task_failure(&task, project, &error.to_string());
             }
         }
-    }
-
-    /// Retry only transient provider transport failures; terminal model responses still become visible failed tasks.
-    fn retry_durable_provider_error(&self, task: &Value, id: &str, error: &AppError) -> bool {
-        let AppError::External(message) = error else {
-            return false;
-        };
-        let kind = task["type"].as_str().unwrap_or_default();
-        let attempts = task["poll_attempts"].as_i64().unwrap_or(1);
-        let story_bible_timed_out =
-            kind == "script_decomposition" && message.contains("故事圣经生成超时");
-        let is_language = ["script_decomposition", "script_expansion"].contains(&kind)
-            && message.contains("请求失败");
-        let is_video_poll = kind == "shot_video"
-            && task["provider_task_id"]
-                .as_str()
-                .is_some_and(|value| !value.is_empty())
-            && message.contains("请求失败");
-        if is_language && !story_bible_timed_out && attempts < 5 {
-            let delay = (5 * 2_i64.pow((attempts - 1).max(0) as u32)).min(60);
-            return self
-                .repository
-                .reschedule_drama_task(
-                    id,
-                    delay,
-                    &format!(
-                        "语言模型连接暂时不可用，{delay} 秒后从已保存内容重试（{attempts}/5）"
-                    ),
-                    Some(message),
-                )
-                .is_ok();
-        }
-        if is_video_poll {
-            return self
-                .repository
-                .reschedule_drama_task(id, 10, "视频模型连接暂时不可用，10 秒后重试", Some(message))
-                .is_ok();
-        }
-        false
     }
 
     /// Mirror a task failure only to the affected asset, shot, or bootstrap project state.
@@ -303,7 +291,7 @@ impl DurableWorker {
             .as_str()
             .unwrap_or_default();
         let refinement = task["input_snapshot"]["refinement"].as_object();
-        let (prompt, refs) = if let Some(refinement) = refinement {
+        let (prompt, refs, audio_refs) = if let Some(refinement) = refinement {
             self.video_refinement_inputs(&project, &shot, &Value::Object(refinement.clone()))?
         } else {
             self.video_generation_inputs(&project, &shot)?
@@ -332,6 +320,7 @@ impl DurableWorker {
                 project["resolution"].as_str().unwrap_or("720p"),
                 shot["duration_seconds"].as_i64().unwrap_or(10),
                 &refs,
+                &audio_refs,
                 source_video.as_deref(),
                 project["video_model"].as_str(),
             )?
