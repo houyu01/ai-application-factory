@@ -15,21 +15,21 @@ function task(type: string, progress: number, stage: string): GenerationTask {
 test('expanding a bootstrap screenplay points creators to the live screenplay', () => {
   assert.equal(
     generationCopy(project, task('script_decomposition', 59, '正在扩写第011至第015集')).title,
-    '扩写剧本(点击上方“剧本”查看实时剧本)',
+    '扩写剧本(点击上方“剧本”查看实时剧本)（调用大模型过程等待时间可能较长，请耐心等待）',
   );
 });
 
 test('continuing a screenplay keeps the same live-screenplay guidance', () => {
   assert.equal(
     generationCopy(project, task('script_expansion', 60, '正在继续扩写剧本')).title,
-    '扩写剧本(点击上方“剧本”查看实时剧本)',
+    '扩写剧本(点击上方“剧本”查看实时剧本)（调用大模型过程等待时间可能较长，请耐心等待）',
   );
 });
 
 test('storyboard decomposition retains its existing step title', () => {
   assert.equal(
     generationCopy(project, task('script_decomposition', 75, '正在整理分集、分镜和素材')).title,
-    '第 3/4 步：拆解分镜',
+    '第 3/4 步：拆解分镜（调用大模型过程等待时间可能较长，请耐心等待）',
   );
 });
 

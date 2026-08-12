@@ -27,20 +27,29 @@ impl DurableWorker {
         let AppError::External(message) = error else {
             return false;
         };
-        let attempts = task["poll_attempts"].as_i64().unwrap_or(1);
-        if task["type"] != "game_graph_decomposition"
+        let latest = self
+            .repository
+            .get_game_task(id)
+            .unwrap_or_else(|_| task.clone());
+        let attempts = latest["poll_attempts"].as_i64().unwrap_or(1);
+        if latest["type"] != "game_graph_decomposition"
             || message != super::game::GAME_GRAPH_VALIDATION_ERROR
             || attempts > GAME_GRAPH_VALIDATION_RETRIES
         {
             return false;
         }
         let delay = durable_retry_delay(attempts);
+        let resume = match latest["input_snapshot"]["graph_generation_stage"].as_str() {
+            Some("assets") => "当前仅重新生成素材目录",
+            Some("nodes") => "将保留已完成素材，仅重新生成视频节点骨架",
+            _ => "将保留已完成素材和视频节点，仅重新生成选择边",
+        };
         self.repository
             .reschedule_game_task(
                 id,
                 delay,
                 &format!(
-                    "模型图谱校验未通过，{delay} 秒后自动重试（第 {attempts}/{GAME_GRAPH_VALIDATION_RETRIES} 次）"
+                    "模型图谱校验未通过，{resume}，{delay} 秒后自动重试（第 {attempts}/{GAME_GRAPH_VALIDATION_RETRIES} 次）"
                 ),
                 Some(message),
             )
@@ -275,6 +284,19 @@ mod tests {
                 true,
             )
             .expect("queue graph task");
+        let pending = repository.get_game(game_id).expect("load graph task")["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .find(|task| task["type"] == "game_graph_decomposition")
+            .cloned()
+            .expect("graph task");
+        repository
+            .update_game_task_snapshot(
+                pending["id"].as_str().expect("graph task id"),
+                json!({"game_id":game_id,"graph_generation_stage":"edges"}),
+            )
+            .expect("save edge stage");
         let claimed = repository
             .claim_game_task_types(&["game_graph_decomposition"])
             .expect("claim graph task")
@@ -297,7 +319,7 @@ mod tests {
         assert_eq!(saved["error_message"], GAME_GRAPH_VALIDATION_ERROR);
         assert!(saved["stage"]
             .as_str()
-            .is_some_and(|stage| stage.contains("图谱校验未通过")));
+            .is_some_and(|stage| stage.contains("仅重新生成选择边")));
         assert!(saved["next_poll_at"].as_str().is_some());
         repository
             .db

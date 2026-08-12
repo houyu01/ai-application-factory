@@ -1,5 +1,6 @@
 //! Quality rules for player-facing decisions in an interactive-video graph.
 
+#[cfg(test)]
 pub(crate) const CHOICE_LABEL_CONTRACT: &str = "选择文案质量（最高优先级）：option_text 是玩家在来源视频结束时点击的、会直接过渡到目标视频的一句话抉择，不是节点标题、线索编号、路线名称或后果说明。它必须写成具体可执行的动作、对话回答、态度立场或信息处置，且同一来源的各项必须互斥、有明显不同的即时行动或关系后果。可以短，如“举手”“不举手”“答应”“推脱”；也可以是有角色口吻的完整回答，如“没问题，请领事放心！”“日军滔天罪行，中国人岂会忘记”“这是我应该的，钱坚决不要！”。也可写策略或处置，如“和平谈判，通过外交解决争端”“交份真实而完整的名单”“委婉拒绝，这是别人的心意”。若扩写稿里的选择仍是“线索1”等占位标签，保留它原有的前往 ID、状态和后果，但必须依据来源与目标视频改写 option_text，绝不可照抄占位标签。绝不可输出“线索1/线索2”“选项A”“路径1”“路线2”“继续”“下一步”“调查路径”等编号或公式化文案；不要把“选择后的结果”写成选项。";
 
 /// Require choice edges to be the visible, causal bridge between independently generated videos.

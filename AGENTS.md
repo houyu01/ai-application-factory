@@ -31,6 +31,17 @@ same contract.
 - Generated lockfiles and binary/media artifacts are exempt from this line
   limit, but source files that generate them are not.
 
+## Documentation and change history
+
+- AI agents may create and modify implementation code within the product
+  boundaries defined above.
+- Do not create, edit, or delete the root `README.md` unless the user
+  explicitly requests that file to be changed.
+- If a change history entry is needed, create it in the root `changlogs/`
+  directory. Every entry must be a newly created Markdown file named
+  `YYYY-MM-DD-HHmm-<topic>.md`; never append to or overwrite an existing entry.
+- Do not add change history to the root `README.md`.
+
 ## Rust documentation requirements
 
 - Every public Rust service, repository, and durable worker type must document

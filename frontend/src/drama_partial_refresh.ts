@@ -7,6 +7,7 @@ import { dramaReferenceAsset } from './drama_reference_asset.js';
 import { dramaShotVideoStatus } from './drama_video_history.js';
 import { hasUnsavedDramaEditorChanges } from './drama_editor_autosave.js';
 import { refreshDramaVideoBatchGeneration } from './drama_video_batch_generation_ui.js';
+import { replaceDramaAssetDrawer } from './drama_asset_drawer_refresh.js';
 import type { ApiProject, GenerationTask } from './models.js';
 
 type PartialRefreshRuntime = {
@@ -133,10 +134,7 @@ async function refreshAssets(project: ApiProject) {
   core.syncDramaShotReferencePanel(project);
   const backdrop = document.querySelector<HTMLElement>('.drama-sheet-backdrop');
   if (backdrop && dramaViewState.assetPanel) {
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = core.dramaAssetDrawer(project);
-    backdrop.replaceWith(wrapper.firstElementChild as HTMLElement);
-    core.bindDramaAssetDrawer(project);
+    replaceDramaAssetDrawer(backdrop, core.dramaAssetDrawer(project), () => core.bindDramaAssetDrawer(project));
   }
 }
 

@@ -277,7 +277,7 @@ function ensureExportRailItem() {
   button.className = 'drama-asset-rail-item drama-video-export-rail-item';
   button.dataset.dramaVideoExportRail = 'true';
   button.title = '打包下载所有剧集视频';
-  button.innerHTML = `<span class="drama-asset-rail-icon">${icon('download')}</span><span>打包下载</span>`;
+  button.innerHTML = `<span class="drama-asset-rail-icon">${icon('download')}</span><span>下载</span>`;
   button.addEventListener('click', () => {
     if (activeDramaProject) openModal(activeDramaProject);
     else rt().toast('请先加载短剧详情');

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AI Application Factory">
+  <!-- Keep the macOS tile within the transparent canvas to match Dock icon scale. -->
+  <g transform="translate(46 46) scale(.8203125)">
+    <rect width="512" height="512" rx="112" fill="#ffffff"/>
+    <g transform="translate(65 79) scale(2.62)">
+      <path d="M 33 51 A 43 43 0 1 1 83 108" fill="none" stroke="#ffc63d" stroke-width="14"/>
+      <path d="M 34 50 A 43 43 0 1 0 94 104" fill="none" stroke="#1cbfd0" stroke-width="14"/>
+      <circle cx="72" cy="57" r="12" fill="#ffc63d"/>
+      <circle cx="54" cy="90" r="11" fill="#1cbfd0"/>
+    </g>
+  </g>
+</svg>

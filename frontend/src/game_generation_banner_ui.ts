@@ -41,7 +41,7 @@ function taskProgress(task: GameTask) {
 
 function currentStep(task: GameTask, graphPlanning: boolean, progress: number) {
   if (!graphPlanning) return progress >= 5 ? 1 : 0;
-  return progress >= 92 || /保存|写入|持久/.test(task.stage || '') ? 3 : 2;
+  return progress >= 92 || /保存|写入|持久|校验未通过|补齐/.test(task.stage || '') ? 3 : 2;
 }
 
 /** Derive creator-visible live output from the durable task snapshot and saved screenplay. */

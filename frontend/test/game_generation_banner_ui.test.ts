@@ -48,14 +48,16 @@ test('game graph generation retains the live skeleton summary after screenplay e
   assert.equal(copy.edgeCount, 1);
 });
 
-test('game graph validation retry remains active and exposes its retry progress', () => {
+test('game graph validation retry stays on the save step while it regenerates only rejected edges', () => {
   const copy = gameGenerationCopy(game({
     tasks: [{
       id: 'graph-1', type: 'game_graph_decomposition', status: '生成中', game_id: 'game-1', progress: 70,
-      stage: '模型图谱校验未通过，1 秒后自动重试（第 1/4 次）', input_snapshot: {},
+      stage: '模型图谱校验未通过，将保留已完成素材和视频节点，仅重新生成选择边，1 秒后自动重试（第 1/4 次）', input_snapshot: {},
     }],
   }))!;
 
   assert.equal(copy.failed, false);
-  assert.match(copy.detail, /自动重试/);
+  assert.equal(copy.step, 3);
+  assert.match(copy.title, /第 4\/4 步：保存图谱/);
+  assert.match(copy.detail, /仅重新生成选择边/);
 });

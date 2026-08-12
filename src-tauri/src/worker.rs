@@ -28,6 +28,8 @@ mod game;
 mod game_asset_prompt;
 #[path = "worker_game_cover.rs"]
 mod game_cover;
+#[path = "worker_game_graph.rs"]
+mod game_graph;
 #[path = "worker_game_placeholder.rs"]
 mod game_placeholder;
 #[path = "worker_game_prompt.rs"]

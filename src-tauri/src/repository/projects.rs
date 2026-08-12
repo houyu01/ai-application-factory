@@ -292,8 +292,9 @@ impl Repository {
         connection: &rusqlite::Connection,
         id: &str,
     ) -> AppResult<Vec<Value>> {
-        let mut statement = connection
-            .prepare("SELECT * FROM drama_assets WHERE drama_id=?1 ORDER BY created_at,id")?;
+        let mut statement = connection.prepare(
+            "SELECT * FROM drama_assets WHERE drama_id=?1 ORDER BY created_at DESC,id DESC",
+        )?;
         let rows = statement
             .query_map([id], row_to_json)?
             .collect::<Result<Vec<_>, _>>()?

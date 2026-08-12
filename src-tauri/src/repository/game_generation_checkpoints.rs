@@ -229,4 +229,99 @@ mod tests {
         );
         fs::remove_dir_all(root).expect("remove test data");
     }
+
+    #[test]
+    fn graph_record_checkpoint_survives_a_failed_retry() {
+        let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+        let repository = Repository::new(
+            Database::open(root.join("ai_application_factory.db")).expect("test database"),
+        );
+        let game = repository
+            .create_game(Map::from_iter([
+                ("name".to_owned(), json!("节点断点")),
+                (
+                    "script".to_owned(),
+                    json!("玩家在钟楼收到失踪同伴的录音，必须在警报响起前找出真相。"),
+                ),
+                ("success_ending_count".to_owned(), json!(1)),
+                ("failure_ending_count".to_owned(), json!(1)),
+            ]))
+            .expect("create game");
+        let game_id = game["id"].as_str().expect("game id");
+        repository
+            .complete_game_screenplay_expansion(
+                game["task"]["id"].as_str().expect("expansion task"),
+                game_id,
+                "【剧情段 S01｜开始】\n【玩家抉择】\n【结局 E01｜成功】\n【结局 E02｜失败】",
+                20,
+                true,
+            )
+            .expect("queue graph task");
+        let graph_task = repository.get_game(game_id).expect("load graph task")["tasks"]
+            .as_array()
+            .expect("tasks")
+            .iter()
+            .find(|task| task["type"] == "game_graph_decomposition")
+            .cloned()
+            .expect("graph task");
+        let graph_task_id = graph_task["id"].as_str().expect("graph task id");
+        let checkpoint = planner::game_graph_progress_checkpoint(
+            &json!({
+                "assets": [
+                    {"id":"detective","type":"character","name":"调查员","prompt":"钟楼调查员"}
+                ],
+                "nodes": [
+                    {"id":"start","node_type":"start","title":"入口","original_text":"调查员进入钟楼。","prompt":"钟楼入口。"},
+                    {"id":"bad","node_type":"invalid","title":"坏节点","original_text":"格式错误节点。","prompt":"不会保存。"}
+                ],
+                "edges": [
+                    {"id":"branch","source_node_id":"start","target_node_id":"bad","option_text":"沿着钟声前进"}
+                ]
+            })
+            .to_string(),
+            None,
+        );
+        repository
+            .update_game_task_snapshot(
+                graph_task_id,
+                json!({
+                    "game_id":game_id,
+                    "graph_progress_checkpoint":checkpoint,
+                    "graph_generation_stage":"nodes"
+                }),
+            )
+            .expect("save record checkpoint");
+        repository
+            .finish_game_task(graph_task_id, FAILED, None, Some("节点格式错误"))
+            .expect("fail graph task");
+
+        let retried = repository
+            .retry_game_generation(game_id)
+            .expect("retry graph task");
+
+        assert_eq!(
+            retried["input_snapshot"]["graph_progress_checkpoint"]["nodes"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            retried["input_snapshot"]["graph_progress_checkpoint"]["nodes"][0]["id"],
+            "start"
+        );
+        assert_eq!(
+            retried["input_snapshot"]["graph_progress_checkpoint"]["edges"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            planner::game_graph_stage(
+                &retried["input_snapshot"]["graph_progress_checkpoint"],
+                &repository.get_game(game_id).expect("reload game"),
+            ),
+            planner::GameGraphStage::Nodes
+        );
+        fs::remove_dir_all(root).expect("remove test data");
+    }
 }
