@@ -42,7 +42,8 @@ use materials::GAME_ASSET_PROMPT_CONTRACT;
 use materials::{normalize_assets, resolve_node_references};
 pub(crate) use stages::{
     game_graph_edge_feedback, game_graph_stage, game_graph_stage_checkpoint,
-    game_graph_stage_prompt, merge_game_graph_stage_response, GameGraphStage,
+    game_graph_stage_prompt, game_graph_stage_response, merge_game_graph_stage_response,
+    GameGraphStage,
 };
 
 /// Build the former all-in-one graph instruction for planner regression coverage.

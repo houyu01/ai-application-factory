@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use super::materials::GAME_ASSET_PROMPT_CONTRACT;
 use super::{game_graph_progress_checkpoint, integer, parse_json_object};
 
+const NODE_BATCH_LIMIT: usize = 4;
+
 /// A single model call owns one graph record family so a long material list cannot truncate nodes or edges.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GameGraphStage {
@@ -77,6 +79,14 @@ pub(crate) fn merge_game_graph_stage_response(
     Some(checkpoint)
 }
 
+/// Re-serialize only durable, complete records after a streamed stage response stops mid-JSON.
+///
+/// The graph worker stores this closed object before asking the model for the next batch, so an
+/// unfinished string or object is never treated as continuation context.
+pub(crate) fn game_graph_stage_response(stage: GameGraphStage, checkpoint: &Value) -> String {
+    json!({stage.key(): checkpoint[stage.key()]}).to_string()
+}
+
 /// Describe the narrow JSON response expected for the next model call and include only relevant context.
 pub(crate) fn game_graph_stage_prompt(
     stage: GameGraphStage,
@@ -99,9 +109,10 @@ pub(crate) fn game_graph_stage_prompt(
             "【本次输出阶段：素材】只生成可复用的角色、场景、道具，不生成节点或选择边。输出 schema：{{\"assets\":[{{\"id\":\"稳定唯一标识\",\"type\":\"character|scene|prop\",\"name\":\"名称\",\"prompt\":\"视觉提示词\"}}]}}。同名素材只保留一项，必须包含主人公角色。{common}\n\n{GAME_ASSET_PROMPT_CONTRACT}\n\n互动剧本：\n{screenplay}{feedback}",
         ),
         GameGraphStage::Nodes => format!(
-            "【本次输出阶段：节点】只生成视频节点，不生成素材或选择边。输出 schema：{{\"nodes\":[{{\"id\":\"稳定唯一标识\",\"node_type\":\"start|normal|success|failure\",\"title\":\"标题\",\"original_text\":\"本节点剧情正文\",\"prompt\":\"视频提示词\",\"reference_asset_ids\":[\"已给素材 id\"],\"duration_seconds\":{duration_min}}}]}}。合并已保存节点后，必须恰好有 1 个 start、{} 个 success、{} 个 failure；每个节点的 original_text 与 prompt 均不可重复，时长为 {duration_min}-{duration_max} 秒。素材只能引用下方目录中的 id。已保存节点不可改写，只补缺失节点。{common}\n\n已保存素材目录：\n{}\n\n已保存节点：\n{}\n\n互动剧本：\n{screenplay}{feedback}",
+            "【本次输出阶段：节点】只生成视频节点，不生成素材或选择边。输出 schema：{{\"nodes\":[{{\"id\":\"稳定唯一标识\",\"node_type\":\"start|normal|success|failure\",\"title\":\"标题\",\"original_text\":\"本节点剧情正文\",\"prompt\":\"视频提示词\",\"reference_asset_ids\":[\"已给素材 id\"],\"duration_seconds\":{duration_min}}}]}}。合并已保存节点后，必须恰好有 1 个 start、{} 个 success、{} 个 failure；每个节点的 original_text 与 prompt 均不可重复，时长为 {duration_min}-{duration_max} 秒。素材只能引用下方目录中的 id。已保存节点不可改写，只补缺失节点。{}{common}\n\n已保存素材目录：\n{}\n\n已保存节点：\n{}\n\n互动剧本：\n{screenplay}{feedback}",
             integer(game, "success_ending_count", 2, 1, 100),
             integer(game, "failure_ending_count", 30, 1, 200),
+            node_batch_instruction(checkpoint, game),
             compact_assets(checkpoint),
             compact_nodes(checkpoint),
         ),
@@ -110,6 +121,30 @@ pub(crate) fn game_graph_stage_prompt(
             compact_nodes(checkpoint),
         ),
     }
+}
+
+fn node_batch_instruction(checkpoint: &Value, game: &Value) -> String {
+    let count = |kind: &str| {
+        checkpoint["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|node| node["node_type"] == kind)
+            .count()
+    };
+    let start = count("start");
+    let normal = count("normal");
+    let success = count("success");
+    let failure = count("failure");
+    let target_success = integer(game, "success_ending_count", 2, 1, 100) as usize;
+    let target_failure = integer(game, "failure_ending_count", 30, 1, 200) as usize;
+    let maximum = integer(game, "branch_max", 4, 2, 4) as usize;
+    let endings = target_success + target_failure;
+    let minimum_internal = endings.saturating_sub(1).div_ceil(maximum - 1);
+    let minimum_normal = minimum_internal.saturating_sub(1);
+    format!(
+        "\n\n【断点续生成，必须遵守】已保存 start {start}/1、normal {normal}/至少 {minimum_normal}、success {success}/{target_success}、failure {failure}/{target_failure}。本次 nodes 数组只能新增 1-{NODE_BATCH_LIMIT} 个节点，必须是完整闭合的 JSON；绝不能重发已保存 id，也不能输出半个字符串、半个对象或未闭合数组。为使最多 {maximum} 条出边能够覆盖全部 {endings} 个结局，normal 总数至少需要 {minimum_normal} 个；补齐结局时也要继续补足可承接它们的 normal 节点。"
+    )
 }
 
 /// Return a focused error for the next edge-only request without leaking a rejected response into persistence.

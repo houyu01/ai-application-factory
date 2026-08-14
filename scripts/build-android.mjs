@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
+import { androidEnvironment } from "./android-environment.mjs";
 import { androidAppDirectory, androidProjectDirectory, projectRoot } from "./android-project.mjs";
 
 const signingFile = join(projectRoot, ".env.android");
@@ -50,7 +51,7 @@ const command = process.platform === "win32" ? "npx.cmd" : "npx";
 const result = spawnSync(
   command,
   ["tauri", "android", "build", "--apk", "--target", "aarch64", "--target", "armv7"],
-  { env: process.env, stdio: "inherit" },
+  { env: androidEnvironment(), stdio: "inherit" },
 );
 
 if (result.error) throw result.error;

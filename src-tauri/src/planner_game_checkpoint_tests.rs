@@ -2,8 +2,8 @@ use serde_json::json;
 
 use super::{
     game_graph_progress_checkpoint, game_graph_stage, game_graph_stage_prompt,
-    merge_game_graph_resume, merge_game_graph_stage_response, model_game_plan,
-    resume_game_graph_prompt, GameGraphStage,
+    game_graph_stage_response, merge_game_graph_resume, merge_game_graph_stage_response,
+    model_game_plan, resume_game_graph_prompt, GameGraphStage,
 };
 
 fn game() -> serde_json::Value {
@@ -48,6 +48,19 @@ fn graph_checkpoint_keeps_nodes_and_branches_around_a_bad_middle_node() {
     assert_eq!(checkpoint["edges"].as_array().map(Vec::len), Some(3));
     assert!(resume_game_graph_prompt(&checkpoint).contains("已保存断点"));
     assert!(resume_game_graph_prompt(&checkpoint).contains("钟楼入口"));
+}
+
+#[test]
+fn truncated_node_response_is_rewritten_as_closed_checkpoint_json() {
+    let response = r#"{"nodes":[{"id":"start","node_type":"start","title":"钟楼入口","original_text":"调查员推开钟楼木门。","prompt":"钟楼入口里的调查员。"},{"id":"partial"#;
+    let checkpoint = game_graph_progress_checkpoint(response, None);
+
+    let recovered = game_graph_stage_response(GameGraphStage::Nodes, &checkpoint);
+    let parsed: serde_json::Value = serde_json::from_str(&recovered).expect("closed JSON");
+
+    assert_eq!(parsed["nodes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(parsed["nodes"][0]["id"], "start");
+    assert!(!recovered.contains("partial"));
 }
 
 #[test]
@@ -102,6 +115,41 @@ fn completed_assets_advance_to_the_node_stage_without_regenerating_them() {
     assert!(prompt.contains("【本次输出阶段：节点】"));
     assert!(prompt.contains("已保存素材目录"));
     assert!(!prompt.contains("\"assets\":[{"));
+}
+
+#[test]
+fn node_batch_prompt_limits_each_continuation_and_exposes_remaining_counts() {
+    let game = json!({
+        "success_ending_count": 2,
+        "failure_ending_count": 30,
+        "branch_min": 2,
+        "branch_max": 4,
+        "node_duration_min": 5,
+        "node_duration_max": 10,
+    });
+    let checkpoint = json!({
+        "assets": [],
+        "nodes": [
+            {"id":"start","node_type":"start"},
+            {"id":"normal-1","node_type":"normal"},
+            {"id":"normal-2","node_type":"normal"},
+            {"id":"normal-3","node_type":"normal"},
+            {"id":"normal-4","node_type":"normal"}
+        ],
+        "edges": []
+    });
+
+    let prompt = game_graph_stage_prompt(
+        GameGraphStage::Nodes,
+        &game,
+        "钟楼互动剧本",
+        &checkpoint,
+        None,
+    );
+
+    assert!(prompt.contains("本次 nodes 数组只能新增 1-4 个节点"));
+    assert!(prompt.contains("normal 4/至少 10"));
+    assert!(prompt.contains("failure 0/30"));
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::AppError;
 
@@ -31,28 +31,37 @@ impl DurableWorker {
             .repository
             .get_game_task(id)
             .unwrap_or_else(|_| task.clone());
-        let attempts = latest["poll_attempts"].as_i64().unwrap_or(1);
+        let retries = latest["input_snapshot"]["graph_validation_retry_count"]
+            .as_i64()
+            .unwrap_or(0)
+            + 1;
         if latest["type"] != "game_graph_decomposition"
             || message != super::game::GAME_GRAPH_VALIDATION_ERROR
-            || attempts > GAME_GRAPH_VALIDATION_RETRIES
+            || retries > GAME_GRAPH_VALIDATION_RETRIES
         {
             return false;
         }
-        let delay = durable_retry_delay(attempts);
+        let delay = durable_retry_delay(retries);
         let resume = match latest["input_snapshot"]["graph_generation_stage"].as_str() {
             Some("assets") => "当前仅重新生成素材目录",
             Some("nodes") => "将保留已完成素材，仅重新生成视频节点骨架",
             _ => "将保留已完成素材和视频节点，仅重新生成选择边",
         };
+        let mut snapshot = latest["input_snapshot"].clone();
+        if !snapshot.is_object() {
+            snapshot = json!({});
+        }
+        snapshot["graph_validation_retry_count"] = json!(retries);
         self.repository
-            .reschedule_game_task(
+            .update_game_task_snapshot(id, snapshot)
+            .and_then(|_| self.repository.reschedule_game_task(
                 id,
                 delay,
                 &format!(
-                    "模型图谱校验未通过，{resume}，{delay} 秒后自动重试（第 {attempts}/{GAME_GRAPH_VALIDATION_RETRIES} 次）"
+                    "模型图谱校验未通过，{resume}，{delay} 秒后自动重试（第 {retries}/{GAME_GRAPH_VALIDATION_RETRIES} 次）"
                 ),
                 Some(message),
-            )
+            ))
             .is_ok()
     }
 
@@ -307,6 +316,16 @@ mod tests {
             MediaStore::new(repository.clone()).expect("media store"),
         )
         .expect("worker");
+        repository
+            .db
+            .with_connection(|connection| {
+                connection.execute(
+                    "UPDATE game_tasks SET poll_attempts=50 WHERE id=?1",
+                    [task_id],
+                )?;
+                Ok(())
+            })
+            .expect("record normal continuation attempts");
 
         assert!(worker.retry_game_graph_validation_error(
             &claimed,
@@ -321,12 +340,19 @@ mod tests {
             .as_str()
             .is_some_and(|stage| stage.contains("仅重新生成选择边")));
         assert!(saved["next_poll_at"].as_str().is_some());
+        assert_eq!(
+            saved["input_snapshot"]["graph_validation_retry_count"],
+            json!(1)
+        );
         repository
             .db
             .with_connection(|connection| {
                 connection.execute(
-                    "UPDATE game_tasks SET poll_attempts=5 WHERE id=?1",
-                    [task_id],
+                    "UPDATE game_tasks SET input_snapshot_json=?1 WHERE id=?2",
+                    rusqlite::params![
+                        json!({"game_id":game_id,"graph_generation_stage":"edges","graph_validation_retry_count":4}).to_string(),
+                        task_id
+                    ],
                 )?;
                 Ok(())
             })

@@ -31,7 +31,7 @@ pub(crate) use game_plan::fallback_game_plan;
 pub(crate) use game_plan::{
     game_expansion_prompt, game_graph_edge_feedback, game_graph_progress_checkpoint,
     game_graph_stage, game_graph_stage_checkpoint, game_graph_stage_prompt,
-    merge_game_graph_stage_response, model_game_plan, GameGraphStage,
+    game_graph_stage_response, merge_game_graph_stage_response, model_game_plan, GameGraphStage,
 };
 pub(crate) use reference_catalog::{
     key as reference_key, resolve_asset as resolve_reference_asset,

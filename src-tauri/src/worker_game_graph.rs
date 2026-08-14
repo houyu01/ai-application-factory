@@ -68,6 +68,10 @@ impl DurableWorker {
             return self.save_game_graph_checkpoint(task_id, game_id, &plan);
         }
         let mut progress_checkpoint = progress_graph_checkpoint(&task);
+        let initial_checkpoint = progress_checkpoint.clone();
+        let mut validation_retry_count = task["input_snapshot"]["graph_validation_retry_count"]
+            .as_i64()
+            .unwrap_or(0);
         let stage = planner::game_graph_stage(&progress_checkpoint, &game);
         let (start_progress, start_stage) = graph_generation_start(&progress_checkpoint, stage);
         self.repository
@@ -107,6 +111,9 @@ impl DurableWorker {
                         planner::game_graph_stage_checkpoint(stage, &preview, &progress_checkpoint);
                     let checkpoint_changed = checkpoint != progress_checkpoint;
                     progress_checkpoint = checkpoint;
+                    if checkpoint_changed {
+                        validation_retry_count = 0;
+                    }
                     let due = preview.len().saturating_sub(saved_bytes) >= PREVIEW_WRITE_MIN_BYTES
                         || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
                     if due || checkpoint_changed {
@@ -117,6 +124,7 @@ impl DurableWorker {
                             &progress_checkpoint,
                             stage,
                             None,
+                            validation_retry_count,
                         )?;
                         saved_bytes = preview.len();
                         last_saved = Instant::now();
@@ -137,15 +145,50 @@ impl DurableWorker {
                     &progress_checkpoint,
                     stage,
                     None,
+                    validation_retry_count,
                 )?;
             }
         }
         let response = response.ok_or_else(|| {
             AppError::External("语言模型未返回游戏图谱，请检查模型配置后重试。".to_owned())
         })?;
-        let checkpoint =
-            planner::merge_game_graph_stage_response(stage, &response, &progress_checkpoint)
-                .ok_or_else(|| AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned()))?;
+        let checkpoint = match planner::merge_game_graph_stage_response(
+            stage,
+            &response,
+            &progress_checkpoint,
+        ) {
+            Some(checkpoint) => checkpoint,
+            None if progress_checkpoint != initial_checkpoint => {
+                let recovered = planner::game_graph_stage_response(stage, &progress_checkpoint);
+                let count = progress_checkpoint[stage.key()]
+                    .as_array()
+                    .map_or(0, Vec::len);
+                let feedback = format!(
+                    "上一次{} JSON 在一条记录中间截断；已裁剪并保存 {count} 条完整记录。只补缺失记录，并返回完整闭合 JSON。",
+                    stage.label()
+                );
+                self.persist_game_graph_preview(
+                    task_id,
+                    game_id,
+                    &recovered,
+                    &progress_checkpoint,
+                    stage,
+                    Some(&feedback),
+                    validation_retry_count,
+                )?;
+                self.repository.reschedule_game_task(
+                    task_id,
+                    1,
+                    &format!(
+                        "模型响应已截断，已保存 {count} 条完整{}，正在续生成",
+                        stage.label()
+                    ),
+                    None,
+                )?;
+                return Ok(());
+            }
+            None => return Err(AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned())),
+        };
         if stage != planner::GameGraphStage::Edges {
             let next_stage = planner::game_graph_stage(&checkpoint, &game);
             if checkpoint == progress_checkpoint && next_stage == stage {
@@ -158,11 +201,15 @@ impl DurableWorker {
                 &checkpoint,
                 next_stage,
                 None,
+                validation_retry_count,
             )?;
-            let (progress, stage) = graph_generation_start(&checkpoint, next_stage);
-            return self
-                .repository
-                .update_game_task_progress(task_id, progress, &stage);
+            let (_, stage_label) = graph_generation_start(&checkpoint, next_stage);
+            return self.repository.reschedule_game_task(
+                task_id,
+                1,
+                &format!("已保存本批图谱记录，{stage_label}"),
+                None,
+            );
         }
         self.repository
             .update_game_task_progress(task_id, 82, "正在复核选择边与完整 DAG 约束")?;
@@ -176,6 +223,7 @@ impl DurableWorker {
                 &progress_checkpoint,
                 stage,
                 Some(&feedback),
+                validation_retry_count,
             )?;
             return Err(AppError::External(GAME_GRAPH_VALIDATION_ERROR.to_owned()));
         };
@@ -212,6 +260,7 @@ impl DurableWorker {
         checkpoint: &Value,
         stage: planner::GameGraphStage,
         validation_feedback: Option<&str>,
+        validation_retry_count: i64,
     ) -> AppResult<()> {
         let received_chars = preview.chars().count();
         let node_count = checkpoint["nodes"].as_array().map_or(0, Vec::len);
@@ -225,6 +274,7 @@ impl DurableWorker {
                 "graph_progress_checkpoint":checkpoint,
                 "graph_generation_stage":stage.key(),
                 "graph_validation_feedback":validation_feedback,
+                "graph_validation_retry_count":validation_retry_count,
                 "preview_received_chars":received_chars,
                 "preview_node_count":node_count,
                 "preview_edge_count":edge_count,
