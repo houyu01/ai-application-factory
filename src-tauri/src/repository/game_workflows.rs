@@ -298,6 +298,28 @@ impl Repository {
         })
     }
 
+    /// Release a game generation task for a delayed fresh model call without discarding its visible preview.
+    ///
+    /// Graph decomposition uses this after its strict model-output validation rejects a response, so
+    /// the desktop workbench can show retry progress while SQLite preserves the same durable task.
+    pub(crate) fn reschedule_game_task(
+        &self,
+        task_id: &str,
+        delay_seconds: i64,
+        stage: &str,
+        error: Option<&str>,
+    ) -> AppResult<()> {
+        self.db.with_connection(|connection| {
+            let next = (chrono::Utc::now() + chrono::Duration::seconds(delay_seconds.max(0)))
+                .to_rfc3339();
+            connection.execute(
+                "UPDATE game_tasks SET stage=?1,error_message=?2,next_poll_at=?3,poll_lease_until=NULL,poll_lease_token=NULL WHERE id=?4 AND status=?5",
+                params![stage, error, next, task_id, GENERATING],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Renew a claimed game task so slow language calls remain owned by the current worker.
     pub(crate) fn renew_game_task_lease(&self, task_id: &str, token: &str) -> AppResult<bool> {
         self.db.with_connection(|connection| {

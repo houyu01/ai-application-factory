@@ -2,6 +2,22 @@
 兼容国内外各大云厂商的模型，可以混用(seedream的图片生成、wanxiang的视频生成)
 <img width="3014" height="1700" alt="image" src="https://github.com/user-attachments/assets/23ac1272-96f7-4972-9c93-90a7e9c5aefe" />
 
+## Android 平板 APK
+
+首次在开发机上执行 `npm run init:android`，它会生成 Tauri 的 Android 工程并安装所需 Rust target。然后复制签名配置：
+
+```bash
+cp .env.android.example .env.android
+```
+
+在 `.env.android` 中填入本地 Android keystore 的绝对路径、别名和密码。首次可用 JDK 的 `keytool -genkeypair -v -keystore /安全路径/ai-application-factory-upload.jks -alias ai-application-factory -keyalg RSA -keysize 2048 -validity 10000` 创建密钥库；密钥和 `.env.android` 不应提交到 Git。
+
+```bash
+npm run build:android:pad
+```
+
+该命令构建 arm64 与 armv7 的通用、已签名 release APK，适用于主流实体 Android 平板。最终安装包始终归档为 `dist/ai-application-factory-<version>-android-pad.apk`。
+
 ## 轻松制作短剧
 超短脚本扩写，并自动分镜
 

@@ -11,6 +11,11 @@ use crate::{
 
 use super::{parse_json_object, review_assets};
 
+#[path = "planner_game_checkpoint.rs"]
+mod checkpoint;
+#[cfg(test)]
+#[path = "planner_game_checkpoint_tests.rs"]
+mod checkpoint_tests;
 #[path = "planner_game_choices.rs"]
 mod choices;
 #[path = "planner_game_expansion.rs"]
@@ -20,14 +25,29 @@ mod expansion;
 mod fallback;
 #[path = "planner_game_materials.rs"]
 mod materials;
+#[path = "planner_game_stages.rs"]
+mod stages;
 
-use choices::{choice_label_key, is_meaningful_choice_label, CHOICE_LABEL_CONTRACT};
+pub(crate) use checkpoint::game_graph_progress_checkpoint;
+#[cfg(test)]
+pub(crate) use checkpoint::{merge_game_graph_resume, resume_game_graph_prompt};
+#[cfg(test)]
+use choices::CHOICE_LABEL_CONTRACT;
+use choices::{choice_label_key, is_meaningful_choice_label};
 pub(crate) use expansion::game_expansion_prompt;
 #[cfg(test)]
 pub(crate) use fallback::fallback_game_plan;
-use materials::{normalize_assets, resolve_node_references, GAME_ASSET_PROMPT_CONTRACT};
+#[cfg(test)]
+use materials::GAME_ASSET_PROMPT_CONTRACT;
+use materials::{normalize_assets, resolve_node_references};
+pub(crate) use stages::{
+    game_graph_edge_feedback, game_graph_stage, game_graph_stage_checkpoint,
+    game_graph_stage_prompt, game_graph_stage_response, merge_game_graph_stage_response,
+    GameGraphStage,
+};
 
-/// Build the strict DAG-planning instruction consumed together with the bundled branch-planner skill.
+/// Build the former all-in-one graph instruction for planner regression coverage.
+#[cfg(test)]
 pub(crate) fn game_graph_prompt(game: &Value, expanded_script: &str) -> String {
     let branch_min = integer(game, "branch_min", 2, 2, 4);
     let branch_max = integer(game, "branch_max", 4, branch_min, 4);

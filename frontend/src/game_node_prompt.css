@@ -73,4 +73,10 @@
 :root[data-theme='dark'] .game-reference-card-image { background: #2a2d33; }
 :root[data-theme='dark'] .game-node-video-configurations { border-color: #454951; }
 @container (max-width: 570px) { .game-node-media-workspace { grid-template-columns: 1fr; } .game-node-video-player, .game-node-video-placeholder { max-height: 360px; aspect-ratio: 16 / 9; } }
+@container (max-width: 340px) {
+  .game-node-media-heading { align-items: stretch; flex-direction: column-reverse; }
+  .game-node-prompt-panel .game-node-media-heading > .game-node-prompt-title { margin-left: 0; text-align: left; }
+  .game-node-prompt-actions { flex-wrap: wrap; height: auto; }
+  .game-inspector .game-prompt-template-label, .game-prompt-template-label select, .game-node-prompt-actions #node-generate-prompt { flex: 1 1 100%; width: 100%; }
+}
 @media (max-width: 760px) { .game-reference-panel-head { align-items: stretch; flex-direction: column-reverse; } .game-reference-panel-head > div { text-align: left; } }

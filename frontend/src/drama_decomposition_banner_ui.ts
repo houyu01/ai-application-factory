@@ -71,7 +71,7 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
       step: 1,
       progress: taskProgress(task),
       receivedChars: undefined,
-      title: EXPANDING_SCREENPLAY_TITLE,
+      title: `${EXPANDING_SCREENPLAY_TITLE}${modelWaitNoticeTitleSuffix()}`,
       detail: task.error_message?.trim() || task.stage || '正在基于已保存的剧本继续扩写。',
     };
   }
@@ -83,8 +83,8 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
     progress: taskProgress(task),
     receivedChars: storyboardReceivedChars(task),
     title: step === 1
-      ? EXPANDING_SCREENPLAY_TITLE
-      : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}`,
+      ? `${EXPANDING_SCREENPLAY_TITLE}${modelWaitNoticeTitleSuffix()}`
+      : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}${modelWaitNoticeTitleSuffix()}`,
     detail: task.error_message?.trim()
       || task.stage
       || (waitingForWorker

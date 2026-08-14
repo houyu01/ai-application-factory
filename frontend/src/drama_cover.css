@@ -235,12 +235,7 @@
   font-size: 38px;
 }
 
-.drama-cover-preview-empty .ui-icon,
-.drama-asset-rail [data-drama-cover-rail] .ui-icon {
-  width: 26px;
-  height: 26px;
-  flex-basis: 26px;
-}
+.drama-cover-preview-empty .ui-icon{width:26px;height:26px;flex-basis:26px}.drama-asset-rail [data-drama-cover-rail] .ui-icon{width:20px;height:20px;flex-basis:20px}
 
 .drama-cover-preview-empty p,
 .drama-cover-preview-empty small {
@@ -419,9 +414,9 @@
 }
 
 .drama-asset-rail [data-drama-cover-rail] {
-  border-top: 1px solid var(--border);
-  padding-top: 14px;
-  margin-top: 4px;
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
 }
 
 :root[data-theme='dark'] .drama-cover-option.selected {

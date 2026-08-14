@@ -83,6 +83,41 @@ fn asset_voice_ids_must_be_enabled_presets_and_can_be_cleared() {
 }
 
 #[test]
+fn newly_created_assets_are_listed_before_existing_assets() {
+    let (repository, root) = repository();
+    let project = repository
+        .create_drama(Map::from_iter([
+            ("name".to_owned(), json!("素材排序短剧")),
+            ("script".to_owned(), json!("主角在雨夜回到旧车站。")),
+        ]))
+        .expect("create project");
+    let project_id = project["id"].as_str().expect("project id");
+    let first = repository
+        .create_asset(
+            project_id,
+            Map::from_iter([
+                ("type".to_owned(), json!("character")),
+                ("name".to_owned(), json!("旧角色")),
+            ]),
+        )
+        .expect("create first asset");
+    let latest = repository
+        .create_asset(
+            project_id,
+            Map::from_iter([
+                ("type".to_owned(), json!("character")),
+                ("name".to_owned(), json!("新角色")),
+            ]),
+        )
+        .expect("create latest asset");
+
+    let assets = repository.list_assets(project_id).expect("list assets");
+    assert_eq!(assets[0]["id"], latest["id"]);
+    assert_eq!(assets[1]["id"], first["id"]);
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
 fn creator_voice_preset_is_persisted_and_can_be_assigned_to_a_character() {
     let (repository, root) = repository();
     let preset = repository

@@ -8,15 +8,15 @@ import { bindGameGraphCanvas, gameGraphCanvasMarkup } from './game_graph_canvas.
 import { bindGameCanvasResize } from './game_canvas_resize.js';
 import { restoreGameEditorScroll } from './game_scroll_restore.js';
 import { openGameScreenplayModal } from './game_screenplay_modal.js';
+import { gameGenerationBannerMarkup } from './game_generation_banner_ui.js';
 import { syncGameTaskPollingUi } from './game_task_polling_ui.js';
-import { GAME_TASK_REFRESH_INTERVAL_MS, gameHasRunningTasks } from './game_task_refresh_state.js';
+import { gameHasRunningTasks, gameTaskRefreshInterval } from './game_task_refresh_state.js';
 import { syncGameVideoBatchGeneration, refreshGameVideoBatchGeneration } from './game_video_batch_generation_ui.js';
 import { syncGameBatchVideoCancellation } from './game_video_batch_cancellation_ui.js';
 import { confirmAction } from './confirmation_modal.js';
 import { icon } from './ui_icons.js';
 import { notifyModelTaskFailures, suppressExistingModelTaskFailureNotifications } from './model_task_failure_toast.js';
 import { bindGamePlayer, gamePlayerMarkup, type GamePlayerSession } from './game_player_ui.js';
-import { modelWaitNoticeTitleSuffix } from './drama_decomposition_banner_ui.js';
 
 type GameRuntime = {
   apiBaseUrl: string;
@@ -120,40 +120,10 @@ export function openGameModal() {
   });
 }
 
-const GAME_GENERATION_STEPS = ['等待执行', '扩写剧本', '拆分视频节点', '保存图谱'];
-
-/** Build the active game-generation title shown at the top of its progress banner. */
-function gameGenerationTitle(currentStep: number, graphPlanning: boolean) {
-  if (!graphPlanning) return '第 2/4 步：扩写互动游戏剧本（上方“剧本”可查看完整内容）';
-  return `第 ${currentStep + 1}/4 步：${GAME_GENERATION_STEPS[currentStep]}${modelWaitNoticeTitleSuffix()}`;
-}
-
-function gameGenerationBanner(game: Game) {
-  const tasks = [...(game.tasks || [])].reverse();
-  const task = tasks.find(item => item.status === '生成中' && ['game_script_expansion', 'game_graph_decomposition'].includes(item.type)) || tasks.find(item => item.status === '生成失败' && ['game_script_expansion', 'game_graph_decomposition'].includes(item.type));
-  if (!task) return '';
-  const failed = task.status === '生成失败';
-  const snapshot = task.input_snapshot || {};
-  const progress = Math.max(0, Math.min(100, Math.round(task.progress || 0)));
-  const graphPlanning = task.type === 'game_graph_decomposition';
-  const currentStep = graphPlanning ? (progress >= 92 || /保存|写入|持久/.test(task.stage || '') ? 3 : 2) : (progress >= 5 ? 1 : 0);
-  const preview = graphPlanning ? String(snapshot.graph_preview || '') : game.expanded_script || String(snapshot.expanded_script_preview || '');
-  const receivedChars = Number(snapshot.preview_received_chars) || Array.from(preview).length;
-  const nodeCount = Number(snapshot.preview_node_count || 0);
-  const edgeCount = Number(snapshot.preview_edge_count || 0);
-  const steps = GAME_GENERATION_STEPS.map((label, index) => `<li class="${index < currentStep ? 'completed' : index === currentStep ? 'active' : ''}"${index === currentStep ? ' aria-current="step"' : ''}><i>${index + 1}</i><span>${label}</span></li>`).join('');
-  const title = failed ? graphPlanning ? '游戏图谱生成失败' : '互动游戏剧本扩写失败' : gameGenerationTitle(currentStep, graphPlanning);
-  const skeleton = graphPlanning ? `<div class="game-meta"><span>视频节点骨架：${nodeCount} 个</span><span>选择边：${edgeCount} 条</span></div>` : '';
-  const received = graphPlanning ? `<span>骨架已接收 ${receivedChars.toLocaleString()} 字</span>` : '';
-  const detail = failed ? task.error_message || `${graphPlanning ? '游戏图谱生成' : '互动游戏剧本扩写'}失败，请检查模型配置后重试。` : task.stage || '正在准备生成任务。';
-  const meter = failed ? '' : `<div class="drama-decomposition-progress"><ol>${steps}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="${progress}"></progress><div class="drama-decomposition-progress-details">${received}<span data-drama-decomposition-progress-label>当前进度 ${progress}%</span></div></div></div>`;
-  return `<section class="drama-decomposition-banner${failed ? ' failed' : ''}" role="${failed ? 'alert' : 'status'}"><span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title">${rt().escapeHtml(title)}</span><p class="drama-decomposition-banner-detail">${rt().escapeHtml(detail)}</p>${meter}${skeleton}<pre class="drama-decomposition-banner-preview"${preview ? '' : ' hidden'} aria-live="polite">${rt().escapeHtml(preview)}</pre>${failed ? '<button type="button" class="ghost compact" id="game-retry-generation">重试</button>' : ''}</div></section>`;
-}
-
 function gameDetailMarkup(game: Game) {
   const nodes = game.nodes || [];
   const screenplay = '';
-  return `<div class="game-detail"><div class="drama-detail-toolbar"><button class="back" id="game-back">← 返回</button><div class="drama-project-field"><input id="game-name-input" value="${rt().escapeHtml(game.name)}" maxlength="120" aria-label="游戏名称" autocomplete="off" /></div><div class="drama-top-actions"><button class="ghost" id="game-script">剧本</button><span class="drama-toolbar-divider" aria-hidden="true"></span><button class="ghost" id="game-global-params">☷ 全局参数</button><button class="ghost" id="game-play">▷ 试玩</button><button class="ghost danger-button" id="game-cancel-all-videos">取消所有视频任务</button><div class="game-video-batch-actions" data-game-video-batch-actions><button class="primary" id="game-generate-all-videos">▣ 生成所有视频</button><button class="primary game-video-batch-toggle" type="button" data-game-video-batch-toggle aria-label="选择视频生成方式" aria-haspopup="true" aria-expanded="false"></button><div class="game-video-batch-menu" data-game-video-batch-menu hidden><button type="button" data-game-generate-videos-serial>串行生成</button><button type="button" data-game-generate-videos-parallel>并行生成</button></div></div><button class="primary" id="game-save">▣ 保存</button></div></div>${gameGenerationBanner(game)}${screenplay}<div class="game-editor-layout">${gameMaterialRailMarkup()}<section class="panel game-canvas-panel"><div class="panel-title"><div><h2>分支编辑画布</h2><p>${nodes.length} 个视频节点 · ${game.edges?.length || 0} 条选择边</p></div><span class="status ${game.status === '生成中' ? 'running' : ''}">${rt().escapeHtml(game.status)}</span></div><div class="game-canvas-wrap">${nodes.length ? gameGraphCanvasMarkup(game, rt().escapeHtml) : '<div class="game-generating"><div class="empty-icon">◌</div><p>正在扩写剧本并生成分支图谱，请稍候…</p></div>'}</div></section><div class="game-canvas-resizer" data-game-canvas-resizer role="separator" aria-orientation="vertical" aria-label="拖动调整画布宽度"></div><section class="panel game-inspector" id="game-inspector"><div class="inspector-empty"><div class="empty-icon">⌁</div><h3>选择一个节点或选项</h3><p>点击中央画布中的节点配置视频，点击选项边配置选择文案。</p></div></section></div></div>`;
+  return `<div class="game-detail"><div class="drama-detail-toolbar"><button class="back" id="game-back">← 返回</button><div class="drama-project-field"><input id="game-name-input" value="${rt().escapeHtml(game.name)}" maxlength="120" aria-label="游戏名称" autocomplete="off" /></div><div class="drama-top-actions"><button class="ghost" id="game-script">剧本</button><span class="drama-toolbar-divider" aria-hidden="true"></span><button class="ghost" id="game-global-params">☷ 全局参数</button><button class="ghost" id="game-play">▷ 试玩</button><button class="ghost danger-button" id="game-cancel-all-videos">取消所有视频任务</button><div class="game-video-batch-actions" data-game-video-batch-actions><button class="primary" id="game-generate-all-videos">▣ 生成所有视频</button><button class="primary game-video-batch-toggle" type="button" data-game-video-batch-toggle aria-label="选择视频生成方式" aria-haspopup="true" aria-expanded="false"></button><div class="game-video-batch-menu" data-game-video-batch-menu hidden><button type="button" data-game-generate-videos-serial>串行生成</button><button type="button" data-game-generate-videos-parallel>并行生成</button></div></div><button class="primary" id="game-save">▣ 保存</button></div></div>${gameGenerationBannerMarkup(game, rt().escapeHtml)}${screenplay}<div class="game-editor-layout">${gameMaterialRailMarkup()}<section class="panel game-canvas-panel"><div class="panel-title"><div><h2>分支编辑画布</h2><p>${nodes.length} 个视频节点 · ${game.edges?.length || 0} 条选择边</p></div><span class="status ${game.status === '生成中' ? 'running' : ''}">${rt().escapeHtml(game.status)}</span></div><div class="game-canvas-wrap">${nodes.length ? gameGraphCanvasMarkup(game, rt().escapeHtml) : '<div class="game-generating"><div class="empty-icon">◌</div><p>正在扩写剧本并生成分支图谱，请稍候…</p></div>'}</div></section><div class="game-canvas-resizer" data-game-canvas-resizer role="separator" aria-orientation="vertical" aria-label="拖动调整画布宽度"></div><section class="panel game-inspector" id="game-inspector"><div class="inspector-empty"><div class="empty-icon">⌁</div><h3>选择一个节点或选项</h3><p>点击中央画布中的节点配置视频，点击选项边配置选择文案。</p></div></section></div></div>`;
 }
 let activeSession: GamePlayerSession | null = null;
 let activeGameEditorId: string | null = null;
@@ -166,7 +136,7 @@ function selectGameNodeInEditor(game: Game, nodeId: string) { selectedGameNode =
 function restoreSelectedGameNode(game: Game) { const selected = selectedGameNode; if (selected?.gameId === game.id && game.nodes?.some(node => node.id === selected.nodeId)) selectGameNodeInEditor(game, selected.nodeId); }
 function scheduleTaskRefresh(game: Game) {
   if (!gameHasRunningTasks(game)) { clearTaskRefresh(); return; } if (taskTimer !== null) return;
-  taskTimer = window.setTimeout(() => { taskTimer = null; if (activeGame === game && activeGameEditorId === game.id && rt().active() === 'interactiveGame') void refreshGameTaskState(game); }, GAME_TASK_REFRESH_INTERVAL_MS);
+  taskTimer = window.setTimeout(() => { taskTimer = null; if (activeGame === game && activeGameEditorId === game.id && rt().active() === 'interactiveGame') void refreshGameTaskState(game); }, gameTaskRefreshInterval(game));
 }
 
 async function refreshGameTaskState(game: Game) {
@@ -176,7 +146,7 @@ async function refreshGameTaskState(game: Game) {
     const latest = gameFromApi(await response.json() as ApiGame);
     if (activeGame !== game || activeGameEditorId !== game.id || rt().active() !== 'interactiveGame') return;
     notifyModelTaskFailures(latest.tasks || [], message => rt().toast?.(message));
-    const graphChanged = syncGameTaskPollingUi({ current: game, latest, runtime: rt(), findTask: taskFor, refresh: () => gameDetail(game.id) });
+    const graphChanged = syncGameTaskPollingUi({ current: game, latest, runtime: rt(), findTask: taskFor, refresh: () => gameDetail(game.id), onRetryGeneration: id => void retryInteractiveGameGeneration(id, true) });
     refreshGameVideoBatchGeneration(game);
     if (graphChanged) await gameDetail(game.id, game);
   } catch (error) { console.warn('互动游戏任务状态加载失败', error); } finally {

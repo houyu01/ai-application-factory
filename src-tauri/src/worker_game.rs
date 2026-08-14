@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::{
     error::{AppError, AppResult},
-    planner, skills,
+    planner,
     value::{CANCELLED, FAILED, GENERATING, SUCCEEDED},
 };
 
@@ -14,6 +14,7 @@ use super::{game_asset_prompt::game_asset_generation_prompt, DurableWorker};
 
 const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
 const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+pub(super) const GAME_GRAPH_VALIDATION_ERROR: &str = "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。";
 
 fn join_game_screenplay(existing: &str, addition: &str) -> String {
     if existing.trim().is_empty() {
@@ -23,16 +24,6 @@ fn join_game_screenplay(existing: &str, addition: &str) -> String {
     } else {
         format!("{}\n\n{}", existing.trim(), addition.trim())
     }
-}
-
-/// Read only a fully normalized graph plan, never the incomplete JSON preview shown while streaming.
-fn graph_checkpoint(task: &Value) -> Option<Value> {
-    let plan = task["input_snapshot"]["graph_checkpoint"].clone();
-    let object = plan.as_object()?;
-    ["assets", "nodes", "edges"]
-        .iter()
-        .all(|key| object.get(*key).is_some_and(Value::is_array))
-        .then_some(plan)
 }
 
 impl DurableWorker {
@@ -58,6 +49,9 @@ impl DurableWorker {
             ))),
         };
         if let Err(error) = result {
+            if self.retry_game_graph_validation_error(&task, id, &error) {
+                return;
+            }
             let terminal =
                 self.repository
                     .finish_game_task(id, FAILED, None, Some(&error.to_string()));
@@ -154,99 +148,6 @@ impl DurableWorker {
         Ok(())
     }
 
-    /// Convert the saved expansion into a validated DAG so later node-video work can progress independently.
-    fn decompose_game_graph(&self, task_id: &str, game_id: &str) -> AppResult<()> {
-        let game = self.repository.get_game(game_id)?;
-        let checkpoint = graph_checkpoint(&self.repository.get_game_task(task_id)?);
-        if let Some(plan) = checkpoint {
-            self.repository.update_game_task_progress(
-                task_id,
-                82,
-                "已读取保存的图谱骨架，正在写入视频节点",
-            )?;
-            return self.save_game_graph_checkpoint(task_id, game_id, &plan);
-        }
-        self.repository
-            .update_game_task_progress(task_id, 8, "正在拆分多分支视频节点")?;
-        let screenplay = game["expanded_script"]
-            .as_str()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| game["script"].as_str().unwrap_or_default());
-        let skill = skills::game_branch_skill(json!({
-            "branch_min": game["branch_min"],
-            "branch_max": game["branch_max"],
-            "success_ending_count": game["success_ending_count"],
-            "failure_ending_count": game["failure_ending_count"],
-        }))?;
-        let prompt = planner::game_graph_prompt(&game, screenplay);
-        let enable_web_search = crate::value::bool_value(&game["enable_web_search"]);
-        let mut preview = String::new();
-        let mut saved_bytes = 0;
-        let mut last_saved = Instant::now() - PREVIEW_WRITE_INTERVAL;
-        let response = self
-            .providers
-            .complete_with_web_search_content_stream(
-                "language",
-                game["language_model"].as_str(),
-                skill["instruction"].as_str().unwrap_or_default(),
-                &prompt,
-                enable_web_search,
-                |delta| {
-                    preview.push_str(delta);
-                    let due = preview.len().saturating_sub(saved_bytes) >= PREVIEW_WRITE_MIN_BYTES
-                        || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
-                    if due {
-                        self.persist_game_graph_preview(task_id, game_id, &preview)?;
-                        saved_bytes = preview.len();
-                        last_saved = Instant::now();
-                    }
-                    Ok(())
-                },
-            )?
-            .filter(|response| !response.trim().is_empty());
-        if let Some(response) = response.as_deref() {
-            if preview != response {
-                self.persist_game_graph_preview(task_id, game_id, response)?;
-            }
-        }
-        let response = response.ok_or_else(|| {
-            AppError::External("语言模型未返回游戏图谱，请检查模型配置后重试。".to_owned())
-        })?;
-        self.repository.update_game_task_progress(
-            task_id,
-            78,
-            "正在复核剧本与人物、场景、道具的对应关系",
-        )?;
-        let plan = planner::model_game_plan(&response, &game).ok_or_else(|| {
-            AppError::External(
-                "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。"
-                    .to_owned(),
-            )
-        })?;
-        self.repository
-            .persist_game_graph_checkpoint(task_id, game_id, &plan)?;
-        self.save_game_graph_checkpoint(task_id, game_id, &plan)
-    }
-
-    /// Write a previously checkpointed, normalized graph to SQLite and then finish its durable task.
-    fn save_game_graph_checkpoint(
-        &self,
-        task_id: &str,
-        game_id: &str,
-        plan: &Value,
-    ) -> AppResult<()> {
-        self.repository.save_generated_game_graph(
-            task_id,
-            game_id,
-            plan["assets"].as_array().unwrap_or(&Vec::new()),
-            plan["nodes"].as_array().unwrap_or(&Vec::new()),
-            plan["edges"].as_array().unwrap_or(&Vec::new()),
-        )?;
-        self.repository
-            .finish_game_task(task_id, SUCCEEDED, Some(plan.clone()), None)?;
-        Ok(())
-    }
-
     /// Write streamed screenplay text to the game and task snapshot before the next provider delta arrives.
     fn persist_game_screenplay_preview(
         &self,
@@ -263,34 +164,6 @@ impl DurableWorker {
             screenplay,
             progress,
             &format!("正在扩写互动游戏剧本（已接收 {received_chars} 字）"),
-        )
-    }
-
-    /// Store streamed graph JSON and recognisable node/choice counts so the editor can render a live skeleton before validation completes.
-    fn persist_game_graph_preview(
-        &self,
-        task_id: &str,
-        game_id: &str,
-        preview: &str,
-    ) -> AppResult<()> {
-        let received_chars = preview.chars().count();
-        let node_count = preview.matches("\"node_type\"").count();
-        let edge_count = preview.matches("\"source_node_id\"").count();
-        let progress = (65 + (received_chars / 80).min(25) as i64).min(90);
-        self.repository.update_game_task_snapshot(
-            task_id,
-            json!({
-                "game_id":game_id,
-                "graph_preview":preview,
-                "preview_received_chars":received_chars,
-                "preview_node_count":node_count,
-                "preview_edge_count":edge_count,
-            }),
-        )?;
-        self.repository.update_game_task_progress(
-            task_id,
-            progress,
-            &format!("正在拆分视频节点骨架（已接收 {received_chars} 字，{node_count} 个节点，{edge_count} 条选择边）"),
         )
     }
 

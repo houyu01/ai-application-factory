@@ -4,6 +4,15 @@ import type { Game } from './models.js';
 
 /** Poll durable game tasks at a restrained rate while at least one is still running. */
 export const GAME_TASK_REFRESH_INTERVAL_MS = 3_000;
+export const GAME_STREAM_REFRESH_INTERVAL_MS = 1_000;
+
+/** Refresh streamed screenplay and graph checkpoints promptly without speeding up video polling. */
+export function gameTaskRefreshInterval(game: Game) {
+  return (game.tasks || []).some(task => task.status === '生成中'
+    && ['game_script_expansion', 'game_graph_decomposition'].includes(task.type))
+    ? GAME_STREAM_REFRESH_INTERVAL_MS
+    : GAME_TASK_REFRESH_INTERVAL_MS;
+}
 
 export function gameHasRunningTasks(game: Game) {
   return (game.tasks || []).some(task => task.status === '生成中');

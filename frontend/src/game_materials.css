@@ -13,13 +13,13 @@
 .game-material-rail .drama-asset-rail-icon {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 20px;
+  height: 20px;
 }
 
 /* Keep the canvas immediately beside the compact material rail. */
 .game-editor-layout {
-  grid-template-columns: 87px minmax(360px, 1fr) 3px minmax(330px, 345px);
+  grid-template-columns: 50px minmax(180px, 1fr) 3px minmax(250px, 345px);
   column-gap: 0;
   row-gap: 18px;
 }
@@ -32,7 +32,7 @@
 }
 
 .game-editor-layout[data-canvas-resized='true'] {
-  grid-template-columns: 87px minmax(360px, var(--game-canvas-width)) 3px minmax(330px, 1fr);
+  grid-template-columns: 50px minmax(180px, var(--game-canvas-width)) 3px minmax(250px, 1fr);
 }
 
 .game-canvas-resizer {
@@ -80,47 +80,47 @@
 }
 
 .game-material-role-icon {
-  width: 25px;
-  height: 25px;
+  width: 20px;
+  height: 20px;
   background: currentColor;
   mask: var(--character-icon-mask) center / contain no-repeat;
   -webkit-mask: var(--character-icon-mask) center / contain no-repeat;
 }
 
 .game-material-scene-icon {
-  width: 23px;
-  height: 23px;
-  border: 2px solid currentColor;
+  width: 19px;
+  height: 19px;
+  border: 1px solid currentColor;
   background: linear-gradient(90deg, transparent 28%, currentColor 29% 35%, transparent 36% 64%, currentColor 65% 71%, transparent 72%), linear-gradient(transparent 28%, currentColor 29% 35%, transparent 36% 64%, currentColor 65% 71%, transparent 72%);
 }
 
 .game-material-prop-icon {
-  width: 21px;
-  height: 21px;
-  border: 2px solid currentColor;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
   transform: rotate(45deg);
 }
 
 .game-material-frame-icon {
-  width: 25px;
-  height: 25px;
-  border: 2px solid currentColor;
-  box-shadow: inset 0 0 0 5px #fff, inset 0 0 0 8px currentColor;
+  width: 20px;
+  height: 20px;
+  border: 1px solid currentColor;
+  box-shadow: inset 0 0 0 4px #fff, inset 0 0 0 7px currentColor;
 }
 
 .game-material-placeholder-icon {
-  width: 25px;
-  height: 16px;
-  border: 2px solid currentColor;
+  width: 20px;
+  height: 13px;
+  border: 1px solid currentColor;
   transform: skew(-27deg);
 }
 
 .game-material-cover-icon {
   position: relative;
-  width: 26px;
-  height: 23px;
-  border: 2px solid currentColor;
-  border-radius: 4px;
+  width: 21px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
 }
 
 .game-material-cover-icon::before,
@@ -130,21 +130,21 @@
 }
 
 .game-material-cover-icon::before {
-  left: 4px;
-  top: 4px;
-  width: 5px;
-  height: 5px;
-  border: 2px solid currentColor;
+  left: 3px;
+  top: 3px;
+  width: 4px;
+  height: 4px;
+  border: 1px solid currentColor;
   border-radius: 50%;
 }
 
 .game-material-cover-icon::after {
-  left: 4px;
+  left: 3px;
   right: 3px;
   bottom: 3px;
-  height: 9px;
-  border-left: 2px solid currentColor;
-  border-top: 2px solid currentColor;
+  height: 7px;
+  border-left: 1px solid currentColor;
+  border-top: 1px solid currentColor;
   transform: skewY(-42deg);
 }
 
@@ -415,14 +415,6 @@
 
 :root[data-theme='dark'] .game-node-link-handle {
   background: #1b1d21;
-}
-
-@media (max-width: 1250px) {
-  .game-material-rail { top: 82px; grid-row: span 2; }
-  .game-editor-layout { grid-template-columns: 79px minmax(440px, 1fr); }
-  .game-editor-layout[data-canvas-resized='true'] { grid-template-columns: 79px minmax(440px, 1fr); }
-  .game-inspector { grid-column: span 2; position: static; max-height: none; margin-left: 0; }
-  .game-canvas-resizer { display: none; }
 }
 
 @media (max-width: 760px) {
