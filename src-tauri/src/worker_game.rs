@@ -12,8 +12,8 @@ use crate::{
 
 use super::{game_asset_prompt::game_asset_generation_prompt, DurableWorker};
 
-const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
-const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(1_500);
+const PREVIEW_WRITE_MIN_BYTES: usize = 768;
 pub(super) const GAME_GRAPH_VALIDATION_ERROR: &str = "语言模型返回的游戏图谱不符合节点、分支、结局或节点文案与提示词唯一性约束；未写入任何兜底节点，请重试。";
 
 fn join_game_screenplay(existing: &str, addition: &str) -> String {
@@ -148,7 +148,7 @@ impl DurableWorker {
         Ok(())
     }
 
-    /// Write streamed screenplay text to the game and task snapshot before the next provider delta arrives.
+    /// Write throttled screenplay text to the game and task snapshot while generation is visible.
     fn persist_game_screenplay_preview(
         &self,
         task_id: &str,

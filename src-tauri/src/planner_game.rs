@@ -64,7 +64,7 @@ pub(crate) fn game_graph_prompt(game: &Value, expanded_script: &str) -> String {
     let prompt = format!(
         "根据扩写剧本生成互动视频游戏图谱。扩写稿是已设计好的分支剧本，必须以其中的“剧情段 ID、玩家抉择、触发条件、状态变化、前往 ID、结局 ID”为事实来源拆分，绝不可把它压平为单线小说或改写掉已有条件。若文本前部保留了旧版单线正文，仅将带有“【互动剧本总览】”“【剧情段】”“【玩家抉择】”“【结局】”标记的结构化区块作为分支事实来源。只能返回一个合法 JSON 对象：{{\"assets\":[...],\"nodes\":[...],\"edges\":[...]}}。\n\n节点结构：{{\"id\":\"唯一标识\",\"node_type\":\"start|normal|success|failure\",\"title\":\"标题\",\"original_text\":\"该视频节点的剧情正文\",\"prompt\":\"可直接生成视频的提示词\",\"reference_asset_ids\":[\"实际出现的素材 id\"],\"duration_seconds\":整数}}。边结构：{{\"id\":\"唯一标识\",\"source_node_id\":\"来源节点\",\"target_node_id\":\"目标节点\",\"option_text\":\"玩家选择文案\",\"sort_order\":整数,\"conditions\":{{\"set\":{{\"状态键\":true}},\"requires\":{{\"状态键\":true}}}}}}。素材结构：{{\"id\":\"唯一标识\",\"type\":\"character|scene|prop\",\"name\":\"名称\",\"prompt\":\"可复用视觉描述\"}}。\n\n映射规则：\n1. 每个“【剧情段 Sxx】”至少映射为一个 start 或 normal 节点；每个“【结局 Exx｜成功/失败】”必须映射为对应类型的终局节点。每条“选择”必须成为从所属剧情段出发的 edge；“前往”指定 edge 的目标；“触发条件”写入 conditions.requires；“状态变化”写入 conditions.set。不得删除、合并或臆造剧本已明确的选择、条件、状态与终局因果。\n2. 必须恰好 1 个 start、{success} 个 success 和 {failure} 个 failure；success/failure 没有出边。若剧本中存在更多同类结局，保留最完整且条件最不同的 {success}/{failure} 个；若不足，基于既有剧情补齐，不得破坏已明确的分支条件。\n3. 图必须是有向无环图（DAG），不是按层铺满的 N 叉树：不同路径可以在任意 normal 节点汇合；成功和失败结局可位于不同深度，绝不可把所有结局集中到最后一层。每次玩家选择都可以直接进入 failure，包括 start 的首次选择；应按剧情风险分散失败结局，而不是延后到最终抉择。\n4. start 节点必须有 {branch_min} 至 {branch_max} 条选择边。normal 节点若承载玩家抉择，也必须有 {branch_min} 至 {branch_max} 条选择边；若只是无抉择的剧情承接，可恰有 1 条线性后继边。所有节点从 start 可达，所有非终局节点可到达某个终局。\n5. 保留剧本中的跨分支状态影响：早期选择的状态变化写入 conditions.set；后续剧情段或结局的触发条件写入 conditions.requires。即使不同路径随后汇合到同一视频节点，也不能丢失状态读取与不同后果。状态值只能为字符串、数字或布尔值，不能把状态写入视频节点。\n6. 每条边的选项必须使用剧本中的玩家选择，并紧密承接来源视频的最后动作/信息，明确导向目标视频的不同后果；不能使用“选项 A”“继续”“路径 1”这类泛化文案。\n7. 每条 original_text 不超过 {node_limit} 个中文字符，去除空白后必须在全图唯一；duration_seconds 必须为 {duration_min} 至 {duration_max} 秒。\n8. 每条 prompt 必须按“场景：”“角色：”“道具：”“风格：”“光线：”“位置：”“镜头：”“前序承接：”“选择后果：”分段，使用 @图说明 reference_asset_ids 中实际素材的参考作用；风格为“{style}”，分辨率为“{resolution}”。去除空白后，任意两条提示词不得完全相同。\n9. 先完整拆出真正可复用的角色、场景、道具；每项素材 prompt 第一行必须是“叙述背景主题：互动游戏”，并写清稳定视觉锚点。角色含身份、年龄/性别、至少三项可观察行为、外貌服装配饰；场景含剧情用途、空间结构、陈设、色调光线；道具含叙事用途、颜色材质、尺寸形制、纹理磨损。不得生成图片 URL。\n10. 主人公不可缺席：先读取“【互动剧本总览】”的主人公并生成其独立 character 素材；若该字段缺失，在生成角色前按玩家目标、主要行动和结局后果判定唯一主人公，仍无法判定时补全一名有真实姓名的主人公并写入 start 节点。主人公必须出现在 start 节点、关键分支和所有结局的剧情或结果中，不能用“玩家”“主角”或群像代替；图谱不得只有场景、道具或配角。\n11. 只配置后续人工选择的首尾帧、占位图和封面，不要生成任何图片。\n\n扩写剧本：\n{expanded_script}",
         success = integer(game, "success_ending_count", 2, 1, 100),
-        failure = integer(game, "failure_ending_count", 30, 1, 200),
+        failure = integer(game, "failure_ending_count", 12, 1, 200),
         style = game["style"].as_str().unwrap_or("真人风格"),
         resolution = game["resolution"].as_str().unwrap_or("720p"),
     );
@@ -158,7 +158,7 @@ fn exact_endings(kinds: &HashMap<String, String>, game: &Value) -> Option<()> {
     };
     (count("start") == 1
         && count("success") == integer(game, "success_ending_count", 2, 1, 100)
-        && count("failure") == integer(game, "failure_ending_count", 30, 1, 200))
+        && count("failure") == integer(game, "failure_ending_count", 12, 1, 200))
     .then_some(())
 }
 fn normalize_edges(raw: &[Value], ids: &HashSet<String>) -> Option<Vec<Value>> {

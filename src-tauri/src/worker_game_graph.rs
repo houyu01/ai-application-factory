@@ -12,8 +12,13 @@ use crate::{
 
 use super::{game::GAME_GRAPH_VALIDATION_ERROR, DurableWorker};
 
-const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
-const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(1_500);
+const PREVIEW_WRITE_MIN_BYTES: usize = 768;
+
+fn graph_preview_write_due(received_bytes: usize, saved_bytes: usize, elapsed: Duration) -> bool {
+    received_bytes.saturating_sub(saved_bytes) >= PREVIEW_WRITE_MIN_BYTES
+        || elapsed >= PREVIEW_WRITE_INTERVAL
+}
 
 /// Read only a fully normalized graph plan, never the incremental record checkpoint.
 fn completed_graph_checkpoint(task: &Value) -> Option<Value> {
@@ -107,16 +112,16 @@ impl DurableWorker {
                 enable_web_search,
                 |delta| {
                     preview.push_str(delta);
-                    let checkpoint =
-                        planner::game_graph_stage_checkpoint(stage, &preview, &progress_checkpoint);
-                    let checkpoint_changed = checkpoint != progress_checkpoint;
-                    progress_checkpoint = checkpoint;
-                    if checkpoint_changed {
-                        validation_retry_count = 0;
-                    }
-                    let due = preview.len().saturating_sub(saved_bytes) >= PREVIEW_WRITE_MIN_BYTES
-                        || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
-                    if due || checkpoint_changed {
+                    if graph_preview_write_due(preview.len(), saved_bytes, last_saved.elapsed()) {
+                        let checkpoint = planner::game_graph_stage_checkpoint(
+                            stage,
+                            &preview,
+                            &progress_checkpoint,
+                        );
+                        if checkpoint != progress_checkpoint {
+                            validation_retry_count = 0;
+                        }
+                        progress_checkpoint = checkpoint;
                         self.persist_game_graph_preview(
                             task_id,
                             game_id,
@@ -266,9 +271,9 @@ impl DurableWorker {
         let node_count = checkpoint["nodes"].as_array().map_or(0, Vec::len);
         let edge_count = checkpoint["edges"].as_array().map_or(0, Vec::len);
         let progress = (65 + (received_chars / 80).min(25) as i64).min(90);
-        self.repository.update_game_task_snapshot(
+        self.repository.persist_game_graph_preview_state(
             task_id,
-            json!({
+            &json!({
                 "game_id":game_id,
                 "graph_preview":preview,
                 "graph_progress_checkpoint":checkpoint,
@@ -279,9 +284,6 @@ impl DurableWorker {
                 "preview_node_count":node_count,
                 "preview_edge_count":edge_count,
             }),
-        )?;
-        self.repository.update_game_task_progress(
-            task_id,
             progress,
             &format!(
                 "正在生成{}（已保存 {node_count} 个节点，{edge_count} 条选择边）",
@@ -293,9 +295,11 @@ impl DurableWorker {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use serde_json::json;
 
-    use super::graph_generation_start;
+    use super::{graph_generation_start, graph_preview_write_due};
     use crate::planner::GameGraphStage;
 
     #[test]
@@ -312,5 +316,16 @@ mod tests {
         assert_eq!(progress, 68);
         assert!(stage.contains("玩家选择边"));
         assert!(stage.contains("2 个节点"));
+    }
+
+    #[test]
+    fn graph_preview_waits_for_coarse_time_or_byte_threshold() {
+        assert!(!graph_preview_write_due(
+            767,
+            0,
+            Duration::from_millis(1_499)
+        ));
+        assert!(graph_preview_write_due(768, 0, Duration::ZERO));
+        assert!(graph_preview_write_due(1, 0, Duration::from_millis(1_500)));
     }
 }

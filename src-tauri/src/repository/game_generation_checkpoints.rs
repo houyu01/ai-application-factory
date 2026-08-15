@@ -13,8 +13,8 @@ use super::Repository;
 impl Repository {
     /// Persist a streamed game screenplay while the creator is watching its expansion task.
     ///
-    /// The interactive-game expansion worker calls this after each visible stream increment so a
-    /// restart can continue from the durable screenplay instead of discarding its generated text.
+    /// The interactive-game expansion worker calls this at a throttled stream boundary so a restart
+    /// can continue from the durable screenplay instead of discarding its generated text.
     pub(crate) fn persist_game_screenplay_preview(
         &self,
         task_id: &str,
@@ -116,6 +116,31 @@ impl Repository {
             {
                 return Err(AppError::BadRequest(format!(
                     "Game task is no longer active: {task_id}"
+                )));
+            }
+            Ok(())
+        })
+    }
+
+    /// Atomically persist a graph stream preview, its accepted records, and visible progress.
+    ///
+    /// The graph worker calls this at its throttled stream boundary so one checkpoint produces one
+    /// SQLite write instead of separate snapshot and progress updates.
+    pub(crate) fn persist_game_graph_preview_state(
+        &self,
+        task_id: &str,
+        snapshot: &Value,
+        progress: i64,
+        stage: &str,
+    ) -> AppResult<()> {
+        self.db.with_connection(|connection| {
+            if connection.execute(
+                "UPDATE game_tasks SET input_snapshot_json=?1,progress=?2,stage=?3 WHERE id=?4 AND type='game_graph_decomposition' AND status=?5",
+                params![json_text(snapshot), progress.clamp(0, 99), stage, task_id, GENERATING],
+            )? == 0
+            {
+                return Err(AppError::BadRequest(format!(
+                    "Game graph task is no longer active: {task_id}"
                 )));
             }
             Ok(())

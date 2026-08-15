@@ -4,6 +4,22 @@ import test from 'node:test';
 import { configureSettingsRuntime, configuredModelSelection, hasEnteredApiKey, isCurrentModelSettingsResponse, modelSettingsCard, restoreSettingsScroll, voiceCatalogMarkup, voicePreviewCanEdit, voicePreviewStyle } from '../src/settings_ui.ts';
 import type { ModelKind, ModelSettings, VoicePreset } from '../src/models.ts';
 import { providerModelProfile } from '../src/model_provider_profiles.ts';
+import { inviteCodeError, settingsImportActionsMarkup } from '../src/settings_import_ui.ts';
+
+test('invite codes are exactly six ASCII letters or digits', () => {
+  assert.equal(inviteCodeError('A1b2C3'), '');
+  assert.match(inviteCodeError('12345'), /6 位/);
+  assert.match(inviteCodeError('12-456'), /6 位/);
+  assert.match(inviteCodeError('邀请码'), /6 位/);
+});
+
+test('shared import actions expose both local and invite-code entry points', () => {
+  const markup = settingsImportActionsMarkup();
+  assert.match(markup, /data-settings-local-import/);
+  assert.match(markup, /本地导入/);
+  assert.match(markup, /data-settings-invite-import/);
+  assert.match(markup, /邀请码配置/);
+});
 
 test('project video selector drops a stale model after the provider changes', () => {
   const alibabaModels = ['wan2.6-r2v-flash'];

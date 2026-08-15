@@ -31,6 +31,7 @@ fn project_list_editor_projection_and_model_queues_keep_python_contracts() {
         ]))
         .expect("create project");
     let id = project["id"].as_str().expect("project id");
+    assert_eq!(project["episode_count"], 15);
     assert_eq!(project["enable_web_search"], true);
     assert_eq!(project["task"]["stage"], "");
     let listed = repository.list_dramas().expect("project list");

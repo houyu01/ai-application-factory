@@ -84,16 +84,24 @@ function writeKeystoreProperties(signing) {
 
 function configureReleaseSigning() {
   let contents = readFileSync(gradleFile, "utf8");
-  if (contents.includes(signingMarker)) return;
+  const signingImports = new Set([
+    "import java.io.FileInputStream",
+    "import java.util.Properties",
+  ]);
+  contents = contents
+    .split(/\r?\n/)
+    .filter((line) => !signingImports.has(line.trim()))
+    .join("\n")
+    .trimStart();
+  contents = `${[...signingImports].join("\n")}\n\n${contents}`;
+  if (contents.includes(signingMarker)) {
+    writeFileSync(gradleFile, contents, "utf8");
+    return;
+  }
 
   if (!contents.includes("plugins {")) {
     throw new Error(`无法识别 Android Gradle 模板：${gradleFile}`);
   }
-  contents = contents.replace(
-    "plugins {",
-    "import java.io.FileInputStream\nimport java.util.Properties\n\nplugins {",
-  );
-
   const signingConfiguration = `
     ${signingMarker}
     signingConfigs {

@@ -15,8 +15,8 @@ use crate::{
 use super::super::retry::immediate_language_retry_delay;
 use super::{support::*, DurableWorker};
 
-const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
-const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(1_500);
+const PREVIEW_WRITE_MIN_CHARS: usize = 512;
 
 impl DurableWorker {
     /// Stream the first story-bible request, checkpointing output so the creation screen can show live model text.
@@ -35,7 +35,8 @@ impl DurableWorker {
         let streamed = 'request: loop {
             for attempt in 1..=3 {
                 let mut preview = String::new();
-                let mut saved_bytes = 0;
+                let mut received_chars = 0;
+                let mut saved_chars = 0;
                 let mut last_saved = Instant::now() - PREVIEW_WRITE_INTERVAL;
                 snapshot.insert("story_bible_preview".to_owned(), json!(preview));
                 self.repository
@@ -48,20 +49,21 @@ impl DurableWorker {
                     web,
                     |delta| {
                         preview.push_str(delta);
-                        let due = preview.len().saturating_sub(saved_bytes)
-                            >= PREVIEW_WRITE_MIN_BYTES
+                        received_chars += delta.chars().count();
+                        let due = received_chars.saturating_sub(saved_chars)
+                            >= PREVIEW_WRITE_MIN_CHARS
                             || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
                         if due {
                             self.persist_story_bible_preview(
                                 task_id, episodes, snapshot, &preview,
                             )?;
-                            saved_bytes = preview.len();
+                            saved_chars = received_chars;
                             last_saved = Instant::now();
                         }
                         Ok(())
                     },
                 );
-                if saved_bytes != preview.len() {
+                if saved_chars != received_chars {
                     self.persist_story_bible_preview(task_id, episodes, snapshot, &preview)?;
                 }
                 match response {

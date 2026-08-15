@@ -8,20 +8,12 @@
  * recovered task finishes following a local worker restart.
  */
 import type { ApiProject, GenerationTask } from './models.js';
+import {
+  syncGenerationElapsedTitle,
+} from './generation_elapsed_ui.ts';
 
 const DECOMPOSITION_STEPS = ['等待执行', '扩写剧本', '拆解分镜', '保存编辑内容'];
 const EXPANDING_SCREENPLAY_TITLE = '扩写剧本(点击上方“剧本”查看实时剧本)';
-export const MODEL_WAIT_NOTICE = '调用大模型过程等待时间可能较长，请耐心等待';
-
-/** Keep the model-wait guidance identical in the drama and game generation banners. */
-export function modelWaitNoticeMarkup() {
-  return `<p class="drama-decomposition-wait-notice">${MODEL_WAIT_NOTICE}</p>`;
-}
-
-/** Format the shared wait guidance when it is part of a generation-banner title. */
-export function modelWaitNoticeTitleSuffix() {
-  return `（${MODEL_WAIT_NOTICE}）`;
-}
 
 function screenplayTask(project: ApiProject | null) {
   const tasks = [...(project?.tasks || [])].reverse();
@@ -71,8 +63,10 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
       step: 1,
       progress: taskProgress(task),
       receivedChars: undefined,
-      title: `${EXPANDING_SCREENPLAY_TITLE}${modelWaitNoticeTitleSuffix()}`,
+      title: EXPANDING_SCREENPLAY_TITLE,
       detail: task.error_message?.trim() || task.stage || '正在基于已保存的剧本继续扩写。',
+      timerKey: `drama:${project.id}:${task.id}`,
+      timerStartedAt: task.started_at || task.created_at,
     };
   }
   const step = currentStep(task);
@@ -83,18 +77,20 @@ export function generationCopy(project: ApiProject, task: GenerationTask) {
     progress: taskProgress(task),
     receivedChars: storyboardReceivedChars(task),
     title: step === 1
-      ? `${EXPANDING_SCREENPLAY_TITLE}${modelWaitNoticeTitleSuffix()}`
-      : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}${modelWaitNoticeTitleSuffix()}`,
+      ? EXPANDING_SCREENPLAY_TITLE
+      : `第 ${step + 1}/4 步：${DECOMPOSITION_STEPS[step]}`,
     detail: task.error_message?.trim()
       || task.stage
       || (waitingForWorker
         ? `任务正在语言模型队列中，当前排在第 ${queuePosition} 位。`
         : '正在准备剧本和已保存的生成进度。'),
+    timerKey: `drama:${project.id}:${task.id}`,
+    timerStartedAt: task.started_at || task.created_at,
   };
 }
 
 function progressMarkup() {
-  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><div class="drama-decomposition-progress-details"><span data-drama-decomposition-received hidden></span><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div>${modelWaitNoticeMarkup()}</div>`;
+  return `<div class="drama-decomposition-progress" data-drama-decomposition-progress><ol>${DECOMPOSITION_STEPS.map((label, index) => `<li data-drama-decomposition-step="${index}"><i>${index + 1}</i><span>${label}</span></li>`).join('')}</ol><div class="drama-decomposition-progress-meter"><progress max="100" value="0"></progress><div class="drama-decomposition-progress-details"><span data-drama-decomposition-received hidden></span><span data-drama-decomposition-progress-label>当前进度 0%</span></div></div></div>`;
 }
 
 function syncProgressIndicator(banner: HTMLElement, step: number, progress: number, failed: boolean, receivedChars?: number) {
@@ -123,7 +119,7 @@ function syncProgressIndicator(banner: HTMLElement, step: number, progress: numb
 }
 
 /** Synchronize the detail-page banner with the newest persisted screenplay task. */
-export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry?: (projectId: string) => void) {
+export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry?: (projectId: string) => void, onStop?: (projectId: string, button: HTMLButtonElement) => void) {
   const detail = document.querySelector<HTMLElement>('.drama-detail');
   if (!detail) return;
   const current = detail.querySelector<HTMLElement>('[data-drama-decomposition-banner]');
@@ -147,10 +143,14 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
     const bannerDetail = current.querySelector<HTMLElement>('.drama-decomposition-banner-detail');
     const preview = current.querySelector<HTMLElement>('.drama-decomposition-banner-preview');
     const retry = current.querySelector<HTMLButtonElement>('[data-drama-retry-decomposition]');
+    const stop = current.querySelector<HTMLButtonElement>('[data-drama-stop-generation]');
     current.classList.toggle('failed', failed);
     current.setAttribute('role', failed ? 'alert' : 'status');
     current.querySelector<HTMLElement>('.generation-spinner')?.toggleAttribute('hidden', failed);
-    setTextIfChanged(title, titleText);
+    if (title) {
+      if (failed) setTextIfChanged(title, titleText);
+      else syncGenerationElapsedTitle(title, titleText, copy.timerKey, copy.timerStartedAt);
+    }
     setTextIfChanged(bannerDetail, detailText);
     syncProgressIndicator(current, copy.step, copy.progress, failed, copy.receivedChars);
     setTextIfChanged(preview, previewText);
@@ -159,6 +159,7 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
       retry.hidden = !failed;
       if (failed && onRetry) retry.onclick = () => onRetry(project!.id);
     }
+    if (stop) { stop.hidden = !generating; stop.onclick = generating && onStop ? () => onStop(project!.id, stop) : null; }
     return;
   }
   const toolbar = detail.querySelector<HTMLElement>('.drama-detail-toolbar');
@@ -167,16 +168,21 @@ export function syncDramaDecompositionBanner(project: ApiProject | null, onRetry
   banner.className = `drama-decomposition-banner${failed ? ' failed' : ''}`;
   banner.dataset.dramaDecompositionBanner = 'true';
   banner.setAttribute('role', failed ? 'alert' : 'status');
-  banner.innerHTML = `<span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title"></span><p class="drama-decomposition-banner-detail"></p>${progressMarkup()}<pre class="drama-decomposition-banner-preview" aria-live="polite"></pre><button type="button" class="ghost compact" data-drama-retry-decomposition${failed ? '' : ' hidden'}>重试</button></div>`;
+  banner.innerHTML = `<span class="generation-spinner" aria-hidden="true"${failed ? ' hidden' : ''}></span><div><span class="drama-decomposition-banner-title"></span><p class="drama-decomposition-banner-detail"></p>${progressMarkup()}<pre class="drama-decomposition-banner-preview" aria-live="polite"></pre><div class="drama-generation-banner-actions"><button type="button" class="ghost compact danger-button" data-drama-stop-generation${generating ? '' : ' hidden'}>停止生成</button></div><button type="button" class="ghost compact" data-drama-retry-decomposition${failed ? '' : ' hidden'}>继续</button></div>`;
   const title = banner.querySelector<HTMLElement>('.drama-decomposition-banner-title');
   const bannerDetail = banner.querySelector<HTMLElement>('.drama-decomposition-banner-detail');
   const preview = banner.querySelector<HTMLElement>('.drama-decomposition-banner-preview');
   const retry = banner.querySelector<HTMLButtonElement>('[data-drama-retry-decomposition]');
-  setTextIfChanged(title, titleText);
+  const stop = banner.querySelector<HTMLButtonElement>('[data-drama-stop-generation]');
+  if (title) {
+    if (failed) setTextIfChanged(title, titleText);
+    else syncGenerationElapsedTitle(title, titleText, copy.timerKey, copy.timerStartedAt);
+  }
   setTextIfChanged(bannerDetail, detailText);
   syncProgressIndicator(banner, copy.step, copy.progress, failed, copy.receivedChars);
   setTextIfChanged(preview, previewText);
   if (preview) preview.hidden = !previewText;
   if (retry && failed && onRetry) retry.onclick = () => onRetry(project!.id);
+  if (stop && generating && onStop) stop.onclick = () => onStop(project!.id, stop);
   toolbar.insertAdjacentElement('afterend', banner);
 }

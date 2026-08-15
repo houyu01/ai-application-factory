@@ -20,13 +20,29 @@ impl DesktopService {
         values: Map<String, Value>,
     ) -> AppResult<Value> {
         let format = video_export_format(&values)?;
+        let destination = video_export_destination(&values)?;
+        if destination == "cloud"
+            && self.repository.setting("storage")?["provider"]
+                .as_str()
+                .unwrap_or("local")
+                == "local"
+        {
+            return Err(AppError::BadRequest(
+                "请先在设置中配置云端媒体存储，或选择保存到本地".to_owned(),
+            ));
+        }
         let selections = self.repository.video_export_snapshot(project_id, &values)?;
         self.repository.create_active_drama_task(
             project_id,
             "drama_video_export",
             Some(format),
-            json!({"project_id":project_id,"format":format,"selections":selections}),
+            json!({"project_id":project_id,"format":format,"destination":destination,"selections":selections}),
         )
+    }
+
+    /// List successful cloud ZIP links shown whenever the project's download dialog opens.
+    pub fn video_export_history(&self, project_id: &str) -> AppResult<Value> {
+        self.repository.video_export_history(project_id)
     }
 
     /// Return the export task displayed by the ZIP dialog, including its final local media URL.
@@ -84,6 +100,18 @@ fn video_export_format(values: &Map<String, Value>) -> AppResult<&str> {
     }
 }
 
+fn video_export_destination(values: &Map<String, Value>) -> AppResult<&str> {
+    match values
+        .get("destination")
+        .and_then(Value::as_str)
+        .unwrap_or("cloud")
+    {
+        "cloud" => Ok("cloud"),
+        "local" => Ok("local"),
+        _ => Err(AppError::BadRequest("保存位置仅支持云端或本地".to_owned())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -98,7 +126,7 @@ mod tests {
         worker::DurableWorker,
     };
 
-    use super::{video_export_format, DesktopService};
+    use super::{video_export_destination, video_export_format, DesktopService};
 
     #[test]
     fn video_export_accepts_only_mp4() {
@@ -107,6 +135,22 @@ mod tests {
 
         assert_eq!(video_export_format(&mp4).expect("mp4 export"), "mp4");
         assert!(video_export_format(&wav).is_err());
+    }
+
+    #[test]
+    fn video_export_defaults_to_cloud_and_accepts_local() {
+        assert_eq!(
+            video_export_destination(&Map::new()).expect("default"),
+            "cloud"
+        );
+        assert_eq!(
+            video_export_destination(&Map::from_iter([(
+                "destination".to_owned(),
+                json!("local")
+            )]))
+            .expect("local"),
+            "local"
+        );
     }
 
     #[test]
@@ -139,7 +183,7 @@ mod tests {
         fs::write(&staging_zip, b"completed-video-zip").expect("archive bytes");
         let source_url = service
             .media
-            .save_video_export_zip(&staging_zip)
+            .save_local_video_export_zip(&staging_zip)
             .expect("publish archive");
         repository
             .finish_drama_task(

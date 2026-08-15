@@ -12,6 +12,8 @@ use crate::{
     value::{FAILED, GENERATING, SUCCEEDED},
 };
 
+#[path = "worker_asset_catalog_review.rs"]
+mod asset_catalog_review;
 #[path = "worker_batch.rs"]
 mod batch;
 #[path = "worker_cover.rs"]

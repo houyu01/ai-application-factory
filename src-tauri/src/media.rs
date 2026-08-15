@@ -23,9 +23,9 @@ use crate::{
 /// Owns generated media files and intentionally limits cloud calls to opt-in object storage settings.
 #[derive(Clone)]
 pub struct MediaStore {
-    repository: Repository,
-    root: PathBuf,
-    client: Client,
+    pub(crate) repository: Repository,
+    pub(crate) root: PathBuf,
+    pub(crate) client: Client,
 }
 
 impl MediaStore {
@@ -273,26 +273,6 @@ impl MediaStore {
                 .map_err(|error| AppError::External(format!("读取导出视频失败：{error}")))?,
         )?;
         Ok(())
-    }
-
-    /// Publish the finished ZIP using the creator's configured media store for the browser's standard download flow.
-    pub fn save_video_export_zip(&self, source: &Path) -> AppResult<String> {
-        let config = self.config()?;
-        if config.provider == "local" {
-            let media_id = format!("{}.zip", new_id().replace('-', ""));
-            fs::copy(source, self.root.join(&media_id))?;
-            return Ok(format!("/api/media/{media_id}"));
-        }
-        self.save(&fs::read(source)?, "zip", "application/zip")
-    }
-
-    /// Copy the completed ZIP owned by a durable export task into a creator-selected destination.
-    ///
-    /// The native desktop save command calls this only after verifying task ownership and completion.
-    /// Local media stays inside the app directory until this boundary copies it; remote configured-storage
-    /// ZIPs are downloaded through the same vetted http(s) path used by the export worker.
-    pub fn copy_video_export_zip(&self, source_url: &str, destination: &Path) -> AppResult<()> {
-        self.copy_for_video_export(source_url, destination)
     }
 
     fn config(&self) -> AppResult<StorageConfig> {

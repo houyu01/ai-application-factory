@@ -64,7 +64,7 @@ pub(crate) fn migrate_legacy_schema(connection: &Connection) -> AppResult<()> {
         &[
             ("video_model", "TEXT NOT NULL DEFAULT 'doubao-seedance-2.0'"),
             ("resolution", "TEXT NOT NULL DEFAULT '720p'"),
-            ("episode_count", "INTEGER NOT NULL DEFAULT 25"),
+            ("episode_count", "INTEGER NOT NULL DEFAULT 15"),
             ("enable_web_search", "INTEGER NOT NULL DEFAULT 0"),
             ("expanded_script_min_chars", "INTEGER NOT NULL DEFAULT 5000"),
             (

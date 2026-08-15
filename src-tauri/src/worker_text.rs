@@ -16,6 +16,14 @@ impl DurableWorker {
         self.repository
             .update_drama_task_progress(id, 65, "正在拆解扩写剧本")?;
         let mut plan = self.long_form_plan(id, &raw, &screenplay)?;
+        self.repository
+            .update_drama_task_progress(id, 75, "正在让模型复核人物、场景和道具目录")?;
+        let reviewed_assets = self.review_asset_catalog_with_model(
+            &raw,
+            &screenplay,
+            plan["assets"].as_array().cloned().unwrap_or_default(),
+        );
+        plan["assets"] = json!(reviewed_assets);
         super::decomposition_assets::enrich(
             &mut plan,
             raw["theme"].as_str().unwrap_or("都市"),
