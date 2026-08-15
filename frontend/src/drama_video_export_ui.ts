@@ -17,9 +17,12 @@ type DramaVideoExportRuntime = {
 
 type ExportDialogState = {
   project: ApiProject;
+  destination: 'cloud' | 'local';
   taskId?: string;
   timer?: number;
 };
+
+type CloudExportHistory = { task_id: string; url: string; file_name?: string; completed_at?: string };
 
 let runtime: DramaVideoExportRuntime | null = null;
 let state: ExportDialogState | null = null;
@@ -66,18 +69,50 @@ function selectionsMarkup(project: ApiProject) {
   }).join('');
 }
 
+function historyMarkup(entries: CloudExportHistory[]) {
+  if (!entries.length) return '<p class="drama-video-export-history-empty">暂无云端下载链接</p>';
+  return entries.map(entry => {
+    const name = entry.file_name || '短剧视频合集.zip';
+    const date = entry.completed_at ? new Date(entry.completed_at).toLocaleString('zh-CN') : '';
+    return `<a class="drama-video-export-history-link" href="${rt().escapeHtml(rt().resolveMediaUrl(entry.url))}" target="_blank" rel="noreferrer"><span>${rt().escapeHtml(name)}</span><small>${rt().escapeHtml(date)}</small></a>`;
+  }).join('');
+}
+
+async function loadCloudHistory(projectId: string) {
+  const target = modal()?.querySelector<HTMLElement>('[data-video-export-history-list]');
+  if (!target) return;
+  try {
+    const response = await fetch(`${rt().apiBaseUrl}/projects/${encodeURIComponent(projectId)}/video-exports`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    target.innerHTML = historyMarkup(await response.json() as CloudExportHistory[]);
+  } catch (error) {
+    target.innerHTML = '<p class="drama-video-export-history-empty">历史链接加载失败</p>';
+    console.error(error);
+  }
+}
+
 function openModal(project: ApiProject) {
   closeModal();
-  state = { project };
+  state = { project, destination: 'cloud' };
   const modal = document.createElement('div');
   modal.className = 'modal-backdrop drama-video-export-backdrop';
   modal.dataset.dramaVideoExportBackdrop = 'true';
-  modal.innerHTML = `<section class="modal drama-video-export-modal" role="dialog" aria-modal="true" aria-labelledby="drama-video-export-title"><header class="drama-video-export-head"><div><h2 id="drama-video-export-title">打包下载视频</h2><p>每集会按已选择分镜的顺序拼接为一个 MP4 文件，再统一压缩为 ZIP。</p></div><button type="button" class="close" data-video-export-close aria-label="关闭">×</button></header><div class="drama-video-export-form"><div class="drama-video-export-format"><span class="drama-video-export-format-label">导出格式</span><span class="drama-video-export-format-value">MP4 视频</span></div><div class="drama-video-export-selection-head"><div><h3>分镜使用版本</h3><p>默认选择“视频历史”中标记的使用版本；未生成视频的分镜会自动跳过。</p></div><span>${(project.shots || []).length} 条分镜</span></div><div class="drama-video-export-selections">${selectionsMarkup(project)}</div><p class="drama-video-export-error" data-video-export-error hidden></p></div><div class="drama-video-export-progress" data-video-export-progress hidden><div class="drama-video-export-progress-copy"><strong>正在准备下载</strong><span data-video-export-stage>等待任务开始</span></div><progress value="0" max="100" data-video-export-progress-value></progress><span data-video-export-progress-label>0%</span></div><footer class="modal-actions drama-video-export-actions"><button type="button" class="ghost" data-video-export-cancel>取消</button><button type="button" class="primary" data-video-export-start>${icon('download')}<span>下载 ZIP</span></button></footer></section>`;
+  modal.innerHTML = `<section class="modal drama-video-export-modal" role="dialog" aria-modal="true" aria-labelledby="drama-video-export-title"><header class="drama-video-export-head"><div><h2 id="drama-video-export-title">打包下载视频</h2><p>每集会按已选择分镜的顺序拼接为一个 MP4 文件，再统一压缩为 ZIP。</p></div><button type="button" class="close" data-video-export-close aria-label="关闭">×</button></header><div class="drama-video-export-form"><section class="drama-video-export-history"><h3>历史云端下载</h3><div data-video-export-history-list><p class="drama-video-export-history-empty">正在加载…</p></div></section><label class="drama-video-export-destination"><span>保存位置</span><select data-video-export-destination><option value="cloud" selected>保存到云端（默认）</option><option value="local">保存到本地</option></select><small data-video-export-destination-help>上传到设置中配置的云端地址，并保留下载链接</small></label><div class="drama-video-export-format"><span class="drama-video-export-format-label">导出格式</span><span class="drama-video-export-format-value">MP4 视频</span></div><div class="drama-video-export-selection-head"><div><h3>分镜使用版本</h3><p>默认选择“视频历史”中标记的使用版本；未生成视频的分镜会自动跳过。</p></div><span>${(project.shots || []).length} 条分镜</span></div><div class="drama-video-export-selections">${selectionsMarkup(project)}</div><p class="drama-video-export-error" data-video-export-error hidden></p></div><div class="drama-video-export-progress" data-video-export-progress hidden><div class="drama-video-export-progress-copy"><strong>正在准备下载</strong><span data-video-export-stage>等待任务开始</span></div><progress value="0" max="100" data-video-export-progress-value></progress><span data-video-export-progress-label>0%</span></div><footer class="modal-actions drama-video-export-actions"><button type="button" class="ghost" data-video-export-cancel>取消</button><button type="button" class="primary" data-video-export-start><span>保存到云端</span></button></footer></section>`;
   document.body.append(modal);
   modal.querySelectorAll<HTMLElement>('[data-video-export-close]').forEach(button => button.addEventListener('click', closeModal));
   modal.querySelector<HTMLButtonElement>('[data-video-export-cancel]')?.addEventListener('click', () => void cancelOrClose());
   modal.querySelector<HTMLButtonElement>('[data-video-export-start]')?.addEventListener('click', () => void startExport());
+  modal.querySelector<HTMLSelectElement>('[data-video-export-destination]')?.addEventListener('change', event => {
+    if (!state) return;
+    const select = event.currentTarget as HTMLSelectElement;
+    state.destination = select.value as 'cloud' | 'local';
+    const label = modal.querySelector<HTMLElement>('[data-video-export-start] span');
+    if (label) label.textContent = select.value === 'cloud' ? '保存到云端' : '保存到本地';
+    const help = modal.querySelector<HTMLElement>('[data-video-export-destination-help]');
+    if (help) help.textContent = select.value === 'cloud' ? '上传到设置中配置的云端地址，并保留下载链接' : '打包完成后选择本机文件夹保存 ZIP';
+  });
   modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
+  void loadCloudHistory(project.id);
 }
 
 function modal() {
@@ -115,7 +150,7 @@ async function startExport() {
   setError();
   try {
     const response = await fetch(`${rt().apiBaseUrl}/projects/${encodeURIComponent(state.project.id)}/video-exports`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'mp4', selections }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'mp4', destination: state.destination, selections }),
     });
     const task = await response.json().catch(() => ({})) as GenerationTask & { detail?: string };
     if (!response.ok) throw new Error(task.detail || `HTTP ${response.status}`);
@@ -123,7 +158,7 @@ async function startExport() {
     showProgress(task);
     pollExportTask();
   } catch (error) {
-    if (start) { start.disabled = false; start.innerHTML = `${icon('download')}<span>下载 ZIP</span>`; }
+    if (start) { start.disabled = false; start.innerHTML = `<span>${state?.destination === 'local' ? '保存到本地' : '保存到云端'}</span>`; }
     setError(error instanceof Error ? error.message : '创建视频下载任务失败');
   }
 }
@@ -156,7 +191,7 @@ async function pollExportTask() {
       const result = task.result as { url?: string; file_name?: string } | null;
       if (!result?.url) throw new Error('ZIP 已完成但找不到下载文件');
       if (state) state.taskId = undefined;
-      await completeDownload(taskId, result.url, result.file_name || '短剧视频合集.zip');
+      await completeDownload(taskId, result.url, result.file_name || '短剧视频合集.zip', state?.destination || 'cloud');
       return;
     }
     throw new Error(task.status === '已取消' ? '视频打包已取消' : task.error_message || '视频打包失败');
@@ -227,7 +262,7 @@ async function saveDesktopZip(taskId: string, fileName: string) {
   }
 }
 
-async function completeDownload(taskId: string, url: string, fileName: string) {
+async function completeDownload(taskId: string, url: string, fileName: string, destination: 'cloud' | 'local') {
   const dialog = modal();
   if (!dialog) return;
   const stage = dialog.querySelector<HTMLElement>('[data-video-export-stage]');
@@ -236,6 +271,18 @@ async function completeDownload(taskId: string, url: string, fileName: string) {
   if (label) label.textContent = '100%';
   const progress = dialog.querySelector<HTMLProgressElement>('[data-video-export-progress-value]');
   if (progress) progress.value = 100;
+  if (destination === 'cloud') {
+    const link = document.createElement('a');
+    link.href = rt().resolveMediaUrl(url);
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    link.textContent = '打开云端 ZIP 下载链接';
+    link.className = 'drama-video-export-result-link';
+    dialog.querySelector<HTMLElement>('[data-video-export-progress]')?.append(link);
+    if (stage) stage.textContent = 'ZIP 已保存到云端，下载链接已记录。';
+    rt().toast('视频 ZIP 已保存到云端');
+    return;
+  }
   if (isDesktopApp()) {
     saveActionButton(dialog, fileName, () => void saveDesktopZip(taskId, fileName));
     await saveDesktopZip(taskId, fileName);

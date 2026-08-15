@@ -31,6 +31,10 @@ test('game screenplay expansion exposes the persisted incremental text in the wo
   assert.match(copy.title, /正在实时输出/);
   assert.match(markup, /林默踏进雨夜的车站/);
   assert.match(markup, /data-game-generation-preview/);
+  assert.ok(markup.indexOf('data-game-generation-preview') < markup.indexOf('data-game-stop-generation'));
+  assert.match(markup, /已经花费0小时0分钟0秒，调用大模型生产时间可能较长/);
+  assert.match(markup, /class="generation-exit-warning"[^>]*>请勿退出应用<\/span>/);
+  assert.doesNotMatch(markup, /drama-decomposition-wait-notice/);
 });
 
 test('game graph generation retains the live skeleton summary after screenplay expansion finishes', () => {
@@ -60,4 +64,25 @@ test('game graph validation retry stays on the save step while it regenerates on
   assert.equal(copy.step, 3);
   assert.match(copy.title, /第 4\/4 步：保存图谱/);
   assert.match(copy.detail, /仅重新生成选择边/);
+});
+
+test('game expansion and graph decomposition share one elapsed-time run', () => {
+  const expansion = { id: 'expand-1', type: 'game_script_expansion', status: '生成成功', game_id: 'game-1', input_snapshot: {}, started_at: '2026-08-14T10:00:00Z' };
+  const graph = { id: 'graph-1', type: 'game_graph_decomposition', status: '生成中', game_id: 'game-1', input_snapshot: {}, started_at: '2026-08-14T10:05:00Z' };
+  const copy = gameGenerationCopy(game({ tasks: [expansion, graph] }))!;
+
+  assert.equal(copy.timerKey, 'game:game-1:expand-1');
+  assert.equal(copy.timerStartedAt, expansion.started_at);
+});
+
+test('failed game generation offers to continue instead of retry', () => {
+  const markup = gameGenerationBannerMarkup(game({
+    tasks: [{
+      id: 'expand-failed', type: 'game_script_expansion', status: '生成失败',
+      game_id: 'game-1', error_message: '连接中断', input_snapshot: {},
+    }],
+  }), String);
+
+  assert.match(markup, /id="game-retry-generation">继续<\/button>/);
+  assert.doesNotMatch(markup, />重试<\/button>/);
 });

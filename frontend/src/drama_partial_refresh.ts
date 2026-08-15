@@ -13,6 +13,7 @@ import type { ApiProject, GenerationTask } from './models.js';
 type PartialRefreshRuntime = {
   apiBaseUrl: string;
   loadFullDetail: (id: string) => Promise<void>;
+  toast: (message: string) => void;
 };
 
 let runtime: PartialRefreshRuntime | null = null;
@@ -44,7 +45,18 @@ function mergeTasks(project: ApiProject, tasks: GenerationTask[]) {
   core.applyDramaGenerationLoading(project, changedTypes);
   syncDramaPromptReferenceImages(project);
   syncDramaCoverUi(project);
-  syncDramaDecompositionBanner(project);
+  syncDramaDecompositionBanner(project, undefined, async (projectId, button) => {
+    button.disabled = true; button.textContent = '停止中…';
+    try {
+      const response = await fetch(`${runtime!.apiBaseUrl}/projects/${projectId}/expanded-script/cancel`, { method: 'POST' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      runtime!.toast('已按当前进度保存并停止生成');
+      await runtime!.loadFullDetail(projectId);
+    } catch (error) {
+      button.disabled = false; button.textContent = '停止生成';
+      runtime!.toast('停止生成失败，请稍后重试'); console.error(error);
+    }
+  });
 }
 
 /** Replace rich-prompt thumbnails only when their referenced asset crosses a loading boundary. */

@@ -26,6 +26,7 @@ type Options = {
   findTask: TaskFinder;
   refresh: () => Promise<void>;
   onRetryGeneration?: (gameId: string) => void;
+  onStopGeneration?: (gameId: string, button: HTMLButtonElement) => void;
 };
 
 function syncStatus(element: HTMLElement | null, status: string) {
@@ -66,7 +67,7 @@ function syncGraphTaskState(game: Game) {
 export function syncGameTaskPollingUi(options: Options) {
   const graphChanged = gameGraphSignature(options.current) !== gameGraphSignature(options.latest);
   mergeGameTaskSnapshot(options.current, options.latest);
-  syncGameGenerationBanner(options.current, options.runtime.escapeHtml, options.onRetryGeneration);
+  syncGameGenerationBanner(options.current, options.runtime.escapeHtml, options.onRetryGeneration, options.onStopGeneration);
   if (graphChanged) return true;
   syncGraphTaskState(options.current);
   syncGameSelectedNode(options.current, options.runtime, options.findTask, options.refresh);

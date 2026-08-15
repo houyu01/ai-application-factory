@@ -22,7 +22,7 @@ impl Repository {
         if script.chars().count() < 10 {
             return Err(AppError::BadRequest("剧本文本不少于 10 个字".to_owned()));
         }
-        let episode_count = create_integer(&values, "episode_count", 25, 2, 100)?;
+        let episode_count = create_integer(&values, "episode_count", 15, 2, 100)?;
         let enable_web_search = optional_boolean(&values, "enable_web_search")?.unwrap_or(false);
         let minimum = create_integer(&values, "expanded_script_min_chars", 5_000, 1, 1_000_000)?;
         let maximum = create_integer(&values, "expanded_script_max_chars", 10_000, 1, 1_000_000)?;

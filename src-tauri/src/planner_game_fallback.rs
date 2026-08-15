@@ -33,7 +33,7 @@ pub(crate) fn fallback_game_plan(game: &Value) -> Value {
         4,
     ) as usize;
     let successes = integer(game, "success_ending_count", 2, 1, 100) as usize;
-    let failures = integer(game, "failure_ending_count", 30, 1, 200) as usize;
+    let failures = integer(game, "failure_ending_count", 12, 1, 200) as usize;
     let ending_count = successes + failures;
     let text_limit = integer(game, "node_script_max_chars", 400, 1, 1_000_000) as usize;
     let duration = ((integer(game, "node_duration_min", 5, 1, 600)

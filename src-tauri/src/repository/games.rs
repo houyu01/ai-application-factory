@@ -26,7 +26,7 @@ impl Repository {
             return Err(AppError::BadRequest("剧本文本不少于 20 个字".to_owned()));
         }
         let success = game_integer(&values, "success_ending_count", 2, 1, 100)?;
-        let failure = game_integer(&values, "failure_ending_count", 30, 1, 200)?;
+        let failure = game_integer(&values, "failure_ending_count", 12, 1, 200)?;
         let branch_min = game_integer(&values, "branch_min", 2, 2, 4)?;
         let branch_max = game_integer(&values, "branch_max", 4, 2, 4)?;
         let duration_min = game_integer(

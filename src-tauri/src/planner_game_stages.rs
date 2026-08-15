@@ -111,7 +111,7 @@ pub(crate) fn game_graph_stage_prompt(
         GameGraphStage::Nodes => format!(
             "【本次输出阶段：节点】只生成视频节点，不生成素材或选择边。输出 schema：{{\"nodes\":[{{\"id\":\"稳定唯一标识\",\"node_type\":\"start|normal|success|failure\",\"title\":\"标题\",\"original_text\":\"本节点剧情正文\",\"prompt\":\"视频提示词\",\"reference_asset_ids\":[\"已给素材 id\"],\"duration_seconds\":{duration_min}}}]}}。合并已保存节点后，必须恰好有 1 个 start、{} 个 success、{} 个 failure；每个节点的 original_text 与 prompt 均不可重复，时长为 {duration_min}-{duration_max} 秒。素材只能引用下方目录中的 id。已保存节点不可改写，只补缺失节点。{}{common}\n\n已保存素材目录：\n{}\n\n已保存节点：\n{}\n\n互动剧本：\n{screenplay}{feedback}",
             integer(game, "success_ending_count", 2, 1, 100),
-            integer(game, "failure_ending_count", 30, 1, 200),
+            integer(game, "failure_ending_count", 12, 1, 200),
             node_batch_instruction(checkpoint, game),
             compact_assets(checkpoint),
             compact_nodes(checkpoint),
@@ -137,7 +137,7 @@ fn node_batch_instruction(checkpoint: &Value, game: &Value) -> String {
     let success = count("success");
     let failure = count("failure");
     let target_success = integer(game, "success_ending_count", 2, 1, 100) as usize;
-    let target_failure = integer(game, "failure_ending_count", 30, 1, 200) as usize;
+    let target_failure = integer(game, "failure_ending_count", 12, 1, 200) as usize;
     let maximum = integer(game, "branch_max", 4, 2, 4) as usize;
     let endings = target_success + target_failure;
     let minimum_internal = endings.saturating_sub(1).div_ceil(maximum - 1);
@@ -217,7 +217,7 @@ fn has_required_node_kinds(nodes: Option<&Vec<Value>>, game: &Value) -> bool {
         })
         && count("start") == 1
         && count("success") == integer(game, "success_ending_count", 2, 1, 100)
-        && count("failure") == integer(game, "failure_ending_count", 30, 1, 200)
+        && count("failure") == integer(game, "failure_ending_count", 12, 1, 200)
 }
 
 fn compact_assets(checkpoint: &Value) -> Value {

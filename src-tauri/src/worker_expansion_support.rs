@@ -24,7 +24,7 @@ impl Fallback for String {
 }
 
 pub(crate) fn target_episode_count(project: &Value) -> AppResult<i64> {
-    let value = project["episode_count"].as_i64().unwrap_or(25);
+    let value = project["episode_count"].as_i64().unwrap_or(15);
     if (2..=100).contains(&value) {
         Ok(value)
     } else {
@@ -170,4 +170,15 @@ pub(crate) fn validate_screenplay(value: &str, target: i64) -> AppResult<()> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn missing_episode_count_uses_the_product_default() {
+        assert_eq!(target_episode_count(&json!({})).expect("episode count"), 15);
+    }
 }

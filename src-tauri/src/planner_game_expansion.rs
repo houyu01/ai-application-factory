@@ -22,7 +22,7 @@ pub(crate) fn game_expansion_prompt(game: &Value) -> String {
     let continuation = !existing.is_empty();
     let structured_existing = existing.contains("【剧情段 S") && existing.contains("【玩家抉择】");
     let success = integer(game, "success_ending_count", 2, 1, 100);
-    let failure = integer(game, "failure_ending_count", 30, 1, 200);
+    let failure = integer(game, "failure_ending_count", 12, 1, 200);
     let prompt = format!(
         "你是互动视频游戏编剧。{mode}。输出可供后续图谱拆分的分支剧本，不要把它写成连续小说段落；不要输出 JSON、Markdown 代码块或创作说明。\n\n{PROTAGONIST_CONTRACT}\n\n完整剧本长度目标为 {minimum} 至 {maximum} 个中文字符。每个剧情段都必须有具体、可拍摄的场景、动作、对白与信息变化，并只承载一个可单独播放的视频节点或一段可继续细拆的连续行动。保持角色、场景、道具、时间线和视觉风格连续；视觉风格为“{style}”，节点视频分辨率为“{resolution}”。\n\n严格使用下列纯文本结构，标题、字段名和 ID 都不可省略：\n【互动剧本总览】\n主人公：姓名｜身份与初始处境｜核心目标｜玩家扮演关系\n世界与冲突：…\n玩家目标：…\n\n【状态变量】\n- state_key：含义；由哪次选择写入；会在何处影响选项或结局。\n\n【剧情段 S01｜开始】\n场景：…\n出场角色与道具：主人公姓名、…\n剧情正文：…\n\n【玩家抉择】\n- 选择：玩家能看见且能理解的动作或回答。\n  触发条件：无，或需要的 state_key=value。\n  状态变化：写入的 state_key=value；没有则写“无”。\n  前往：Sxx 或 Exx；说明这项选择造成的即时后果。\n\n每一个后续剧情段继续使用“【剧情段 Sxx｜标题】”和“【玩家抉择】”。线性承接也要写一个唯一的“继续推进”选择及其前往 ID。不同路线可以汇合到同一个 Sxx；汇合后必须保留先前状态，使后续选择或结局能因状态不同而出现不同后果。不要使用“选项 A”“继续”“路线 1”这类空泛文案。\n\n最后逐一列出所有终局：\n【结局 E01｜成功】或【结局 E01｜失败】\n达成条件：需要的状态、最后一次选择与因果关系。\n结局正文：可拍摄的收束场景、角色结果与情绪。\n\n必须恰好设计 {success} 个成功结局和 {failure} 个失败结局。失败应分散在不同抉择深度，允许早期错误直接失败；每个结局的达成条件和画面结果必须不同。至少设计一组“早期状态写入、跨分支汇合、后期状态读取并兑现”的影响，状态键必须为简短 snake_case，值只能是字符串、数字或布尔值。\n\n原始剧本：\n{source}\n\n已保存的分支剧本：\n{existing}",
         mode = if !continuation {
@@ -44,7 +44,7 @@ pub(crate) fn game_expansion_prompt(game: &Value) -> String {
 pub(crate) fn fallback_game_expansion(game: &Value) -> String {
     let source = game["script"].as_str().unwrap_or_default().trim();
     let success = integer(game, "success_ending_count", 2, 1, 100);
-    let failure = integer(game, "failure_ending_count", 30, 1, 200);
+    let failure = integer(game, "failure_ending_count", 12, 1, 200);
     let mut screenplay = format!(
         "【互动剧本总览】\n世界与冲突：{source}\n玩家目标：在风险升级前辨别关键信息，做出能改变结果的选择。\n\n【状态变量】\n- evidence_secured：是否取得可验证的关键证据；在 S02 的调查选择写入；在终局决定能否安全揭示真相。\n\n【剧情段 S01｜危机开始】\n场景：原始剧本中的首个关键地点。\n出场角色与道具：主角、推动冲突的关键人物或物件。\n剧情正文：{source}\n\n【玩家抉择】\n- 选择：谨慎观察现场并确认线索。\n  触发条件：无。\n  状态变化：无。\n  前往：S02；获得继续调查的机会。\n- 选择：在信息不足时贸然行动。\n  触发条件：无。\n  状态变化：无。\n  前往：E{:02}；立即暴露于风险。\n\n【剧情段 S02｜线索取舍】\n场景：与首个地点连贯的调查区域。\n出场角色与道具：主角、关键线索与阻碍者。\n剧情正文：主角发现两条互相矛盾的线索，必须在时间压力下决定是否保全证据。\n\n【玩家抉择】\n- 选择：带走可验证的证据，再前往真相所在处。\n  触发条件：无。\n  状态变化：evidence_secured=true。\n  前往：S03；证据被妥善保留。\n- 选择：相信未经验证的说辞并丢下证据。\n  触发条件：无。\n  状态变化：evidence_secured=false。\n  前往：S03；表面上节省时间，却失去关键筹码。\n\n【剧情段 S03｜真相对峙】\n场景：冲突最终发生的封闭空间。\n出场角色与道具：主角、对手、关键证据。\n剧情正文：主角与对手正面相遇，先前保留的证据决定其是否能证明真相并脱身。\n\n【玩家抉择】\n- 选择：在证据完整时公开真相并请求支援。\n  触发条件：evidence_secured=true。\n  状态变化：无。\n  前往：E01；让早期调查的成果兑现。\n- 选择：没有证据仍孤身指控对手。\n  触发条件：evidence_secured=false。\n  状态变化：无。\n  前往：E{:02}；对手反转局势。\n\n",
         success + 1,

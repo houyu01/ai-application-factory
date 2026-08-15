@@ -20,7 +20,30 @@ const CHARACTER_MANIFEST_MARKERS: &[&str] = &[
     "人物清单",
 ];
 const NON_PERSON_SUFFIXES: &[&str] = &[
-    "衫", "衣", "裤", "鞋", "帽", "镜", "袋", "筐", "瓜", "藤", "报告", "手册", "样品", "烟袋",
+    "衫",
+    "衣",
+    "裤",
+    "鞋",
+    "帽",
+    "镜",
+    "袋",
+    "筐",
+    "瓜",
+    "藤",
+    "报告",
+    "手册",
+    "样品",
+    "烟袋",
+    "公文包",
+    "笔记本",
+    "文件夹",
+    "手提包",
+    "钱包",
+    "背包",
+    "皮箱",
+    "日记本",
+    "包",
+    "本",
     "孙女",
 ];
 const STABLE_TITLES: &[&str] = &[
@@ -403,6 +426,7 @@ fn plausible_character(name: &str) -> bool {
         && !name
             .chars()
             .any(|character| NON_NAME_CHARS.contains(&character))
+        && name.chars().last() != Some('一')
         && !NON_PERSON_SUFFIXES
             .iter()
             .any(|suffix| name.ends_with(suffix))

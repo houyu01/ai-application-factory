@@ -59,6 +59,19 @@ async function retryDramaScriptDecomposition(projectId: string) {
   }
 }
 
+async function stopDramaGeneration(projectId: string, button: HTMLButtonElement) {
+  button.disabled = true; button.textContent = '停止中…';
+  try {
+    const response = await fetch(`${rt().apiBaseUrl}/projects/${projectId}/expanded-script/cancel`, { method: 'POST' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    rt().toast('已按当前进度保存并停止生成');
+    await rt().loadDramaDetail(projectId);
+  } catch (error) {
+    button.disabled = false; button.textContent = '停止生成';
+    rt().toast('停止生成失败，请稍后重试'); console.error(error);
+  }
+}
+
 function alignDramaAssetSheetToWorkspace() {
   const detail = document.querySelector<HTMLElement>('.drama-detail');
   const main = detail?.closest<HTMLElement>('.shell > main');
@@ -186,7 +199,7 @@ export function ensureDramaDetailToolbar() {
   const toolbar = detail?.querySelector<HTMLElement>('.drama-detail-toolbar');
   if (!detail || !toolbar || toolbar.dataset.gameToolbar) return;
   detail.querySelector('#drama-save-shot')?.remove();
-  syncDramaDecompositionBanner(activeDramaProject, projectId => void retryDramaScriptDecomposition(projectId));
+  syncDramaDecompositionBanner(activeDramaProject, projectId => void retryDramaScriptDecomposition(projectId), (projectId, button) => void stopDramaGeneration(projectId, button));
   if (toolbar.querySelector('[data-drama-top-actionbar]')) return;
   ensureVideoPublicPromptButton();
   toolbar.querySelectorAll('.drama-config-field').forEach(field => field.remove());

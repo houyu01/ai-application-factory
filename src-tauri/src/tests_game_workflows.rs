@@ -94,6 +94,7 @@ fn game_editor_save_persists_the_toolbar_title() {
             ),
         ]))
         .expect("create game");
+    assert_eq!(game["failure_ending_count"], 12);
     let game_id = game["id"].as_str().expect("game id");
     repository
         .save_game_graph(

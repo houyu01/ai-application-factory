@@ -18,8 +18,8 @@ use super::{
     DurableWorker,
 };
 
-const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(250);
-const PREVIEW_WRITE_MIN_BYTES: usize = 96;
+const PREVIEW_WRITE_INTERVAL: Duration = Duration::from_millis(1_500);
+const PREVIEW_WRITE_MIN_CHARS: usize = 512;
 
 impl DurableWorker {
     /// Streams one screenplay installment into the bootstrap task preview while retaining only generated body text.
@@ -40,7 +40,8 @@ impl DurableWorker {
         );
         for attempt in 1..=3 {
             let mut installment = String::new();
-            let mut saved_bytes = 0;
+            let mut received_chars = 0;
+            let mut saved_chars = 0;
             let mut last_saved = Instant::now() - PREVIEW_WRITE_INTERVAL;
             let response = self.providers.complete_with_web_search_content_stream(
                 "language",
@@ -50,8 +51,8 @@ impl DurableWorker {
                 web,
                 |delta| {
                     installment.push_str(delta);
-                    let due = installment.len().saturating_sub(saved_bytes)
-                        >= PREVIEW_WRITE_MIN_BYTES
+                    received_chars += delta.chars().count();
+                    let due = received_chars.saturating_sub(saved_chars) >= PREVIEW_WRITE_MIN_CHARS
                         || last_saved.elapsed() >= PREVIEW_WRITE_INTERVAL;
                     if due {
                         self.persist_screenplay_preview(
@@ -62,13 +63,13 @@ impl DurableWorker {
                             stage,
                             target_chars,
                         )?;
-                        saved_bytes = installment.len();
+                        saved_chars = received_chars;
                         last_saved = Instant::now();
                     }
                     Ok(())
                 },
             );
-            if saved_bytes != installment.len() {
+            if saved_chars != received_chars {
                 self.persist_screenplay_preview(
                     task_id,
                     snapshot,

@@ -8,6 +8,7 @@ mod error;
 mod mapping;
 mod media;
 mod media_protocol;
+mod media_video_export;
 mod migration;
 mod planner;
 mod providers;
@@ -64,10 +65,13 @@ mod tests_video_refinement;
 #[cfg(test)]
 mod tests_video_storage;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::path::PathBuf;
 
 use serde_json::json;
-use tauri::{path::BaseDirectory, Manager, State};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::path::BaseDirectory;
+use tauri::{Manager, State};
 
 use crate::{
     api::{ApiRequest, ApiResponse},
@@ -109,13 +113,18 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            let skill_initialization = skills::initialize_embedded();
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             let skill_directory = if cfg!(debug_assertions) {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
             } else {
                 app.path()
                     .resolve("resources/skills", BaseDirectory::Resource)?
             };
-            skills::initialize(skill_directory)
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            let skill_initialization = skills::initialize(skill_directory);
+            skill_initialization
                 .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })?;
             let data_dir = app.path().app_data_dir()?;
             let service = DesktopService::open(data_dir)

@@ -1,0 +1,8 @@
+.generation-exit-warning {
+  color: #d93025;
+  font-weight: 700;
+}
+
+:root[data-theme='dark'] .generation-exit-warning {
+  color: #ff6b63;
+}

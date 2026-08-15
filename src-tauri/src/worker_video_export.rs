@@ -88,7 +88,12 @@ impl DurableWorker {
         self.ensure_export_active(project_id, task_id)?;
         self.repository
             .update_drama_task_progress(task_id, 96, "正在保存下载文件")?;
-        let url = self.media.save_video_export_zip(&archive)?;
+        let destination = task["input_snapshot"]["destination"].as_str();
+        let url = match destination {
+            Some("local") => self.media.save_local_video_export_zip(&archive)?,
+            Some("cloud") => self.media.save_cloud_video_export_zip(&archive)?,
+            _ => self.media.save_legacy_video_export_zip(&archive)?,
+        };
         let project = self.repository.get_drama(project_id)?;
         let file_name = format!(
             "{}-视频合集.zip",
@@ -97,7 +102,7 @@ impl DurableWorker {
         self.repository.finish_drama_task(
             task_id,
             SUCCEEDED,
-            Some(json!({"url":url,"file_name":file_name,"format":"mp4","episode_count":outputs.len()})),
+            Some(json!({"url":url,"file_name":file_name,"format":"mp4","destination":destination.unwrap_or("legacy"),"episode_count":outputs.len()})),
             None,
         )?;
         Ok(())

@@ -38,6 +38,46 @@ fn drama_reviewer_discards_compound_prop_and_adds_missing_named_character() {
 }
 
 #[test]
+fn reviewer_does_not_treat_leather_bag_or_notebook_as_people() {
+    let script = "角色：王德福\n王德福拎着皮公文包，拿出皮笔记本记录。";
+    let assets = review_assets(
+        script,
+        "年代剧",
+        vec![
+            json!({"type":"character","name":"皮公文包","source_evidence":"王德福拎着皮公文包","prompt":"皮质公文包"}),
+            json!({"type":"character","name":"皮笔记本","source_evidence":"拿出皮笔记本记录","prompt":"皮质笔记本"}),
+        ],
+    );
+    assert!(!assets.iter().any(|asset| asset["type"] == "character"
+        && ["皮公文包", "皮笔记本"].contains(&asset["name"].as_str().unwrap_or_default())));
+    assert!(assets
+        .iter()
+        .any(|asset| asset["type"] == "prop" && asset["name"] == "皮公文包"));
+    assert!(assets
+        .iter()
+        .any(|asset| asset["type"] == "prop" && asset["name"] == "皮笔记本"));
+}
+
+#[test]
+fn reviewer_removes_name_with_stuck_quantifier_tail() {
+    let script = "角色：王德福\n王德福一把拿起皮公文包。";
+    let assets = review_assets(
+        script,
+        "年代剧",
+        vec![
+            json!({"type":"character","name":"王德福","source_evidence":"王德福一把拿起","prompt":"村长"}),
+            json!({"type":"character","name":"王德福一","source_evidence":"王德福一把拿起","prompt":"村长"}),
+        ],
+    );
+    assert!(assets
+        .iter()
+        .any(|asset| asset["type"] == "character" && asset["name"] == "王德福"));
+    assert!(!assets
+        .iter()
+        .any(|asset| asset["type"] == "character" && asset["name"] == "王德福一"));
+}
+
+#[test]
 fn game_reviewer_repairs_model_materials_before_graph_persistence() {
     let game = json!({
         "script": WATERMELON_SCRIPT,

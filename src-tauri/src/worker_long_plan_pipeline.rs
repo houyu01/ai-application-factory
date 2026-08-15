@@ -66,11 +66,12 @@ impl DurableWorker {
             "script_decomposer",
             json!({"shot_script_max_chars": project["shot_script_max_chars"].as_i64().unwrap_or(400)}),
         )?;
-        let instruction = decomposer["instruction"].as_str().unwrap_or_default();
+        let inventory_instruction = decomposer["instruction"].as_str().unwrap_or_default();
+        let storyboard_instruction = "只生成分集和分镜骨架；素材目录由并行的独立流程负责。顶层 JSON 只能包含 episodes，不得包含 assets。每条分镜必须保留实际出现素材的 references，供跨批人物连续性和后续素材绑定使用。";
         let inventory_system = format!(
             "{}\n\n你只负责素材盘点。严格输出合法 JSON，不要 Markdown。\n\n拆解执行规范：\n{}",
             skills::drama_agent_system()?,
-            instruction,
+            inventory_instruction,
         );
         let mut pending =
             pending_inventory_range(&snapshot, batches, completed).map(|(start, end)| {
@@ -102,7 +103,7 @@ impl DurableWorker {
                     pending.take().expect("checked pending batch"),
                 )?;
             }
-            let known_characters = character_names(&assets);
+            let known_characters = known_character_names(&assets, &episodes);
             let prior_received = received_chars;
             let batch_index = (completed + relative_index * EPISODES_PER_DECOMPOSITION_BATCH)
                 / EPISODES_PER_DECOMPOSITION_BATCH;
@@ -120,7 +121,7 @@ impl DurableWorker {
                 batch_count,
                 progress,
                 prior_received,
-                instruction,
+                storyboard_instruction,
                 enable_web,
             ) {
                 Ok(response) => response,
@@ -152,7 +153,6 @@ impl DurableWorker {
                 .and_then(planner::parse_json_object)
                 .unwrap_or_else(|| json!({}));
             let current_episodes = normalized_episodes(&parsed, batch, project);
-            let current_assets = model_assets(&parsed, &batch_source(batch));
             if let Some(previous) = pending.take() {
                 self.commit_pending_inventory(
                     task_id,
@@ -164,7 +164,6 @@ impl DurableWorker {
                 )?;
             }
             episodes.extend(current_episodes);
-            assets.extend(current_assets);
             received_chars += received;
             save_decomposition_checkpoint(
                 &mut snapshot,
@@ -282,21 +281,24 @@ fn normalized_episodes(parsed: &Value, batch: &[support::Episode], project: &Val
         .collect()
 }
 
-fn model_assets(parsed: &Value, source: &str) -> Vec<Value> {
-    let evidence = planner::AssetEvidence::from_script(source);
-    parsed["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|item| valid_asset(item, &evidence))
-        .collect()
-}
-
-fn character_names(assets: &[Value]) -> Vec<String> {
+fn known_character_names(assets: &[Value], episodes: &[Value]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
     assets
         .iter()
         .filter(|asset| asset["type"] == "character")
-        .filter_map(|asset| asset["name"].as_str().map(str::to_owned))
+        .filter_map(|asset| asset["name"].as_str())
+        .chain(
+            episodes
+                .iter()
+                .filter_map(|episode| episode["shots"].as_array())
+                .flatten()
+                .filter_map(|shot| shot["references"].as_array())
+                .flatten()
+                .filter(|reference| reference["asset_type"] == "character")
+                .filter_map(|reference| reference["asset_name"].as_str()),
+        )
+        .filter(|name| seen.insert((*name).to_owned()))
+        .map(str::to_owned)
         .collect()
 }
 
@@ -304,14 +306,18 @@ fn character_names(assets: &[Value]) -> Vec<String> {
 mod tests {
     use serde_json::json;
 
-    use super::character_names;
+    use super::known_character_names;
 
     #[test]
-    fn next_batch_uses_the_durably_saved_primary_assets() {
-        let names = character_names(&[
-            json!({"type":"character","name":"已存角色"}),
-            json!({"type":"character","name":"当前批角色"}),
-        ]);
+    fn next_batch_uses_inventory_and_prior_shot_references() {
+        let names = known_character_names(
+            &[json!({"type":"character","name":"已存角色"})],
+            &[json!({"shots":[{"references":[
+                {"asset_type":"character","asset_name":"当前批角色"},
+                {"asset_type":"character","asset_name":"已存角色"},
+                {"asset_type":"scene","asset_name":"旧居"}
+            ]}]})],
+        );
         assert_eq!(names, ["已存角色", "当前批角色"]);
     }
 }

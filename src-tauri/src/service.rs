@@ -38,6 +38,8 @@ mod restart;
 mod screenplay;
 #[path = "service_serial_video_batch.rs"]
 mod serial_video_batch;
+#[path = "service_settings_import.rs"]
+mod settings_import;
 #[path = "service_video_export.rs"]
 mod video_export;
 #[path = "service_video_refinement.rs"]

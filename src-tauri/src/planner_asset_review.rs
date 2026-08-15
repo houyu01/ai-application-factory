@@ -20,7 +20,54 @@ pub(crate) fn review_assets(script: &str, theme: &str, assets: Vec<Value>) -> Ve
     for asset in extracted_assets(script, theme) {
         merge_asset(&mut reviewed, asset);
     }
-    reviewed
+    reconcile_cross_type_conflicts(reviewed, &evidence)
+}
+
+/// Remove category collisions and OCR-like name tails after every source-backed asset is merged.
+fn reconcile_cross_type_conflicts(mut assets: Vec<Value>, evidence: &AssetEvidence) -> Vec<Value> {
+    let prop_names = evidence.names("prop");
+    assets.retain(|asset| {
+        asset["type"] != "character"
+            || !asset["name"].as_str().is_some_and(|name| {
+                prop_names.iter().any(|prop| prop == name) || looks_like_object(name)
+            })
+    });
+    let character_names = assets
+        .iter()
+        .filter(|asset| asset["type"] == "character")
+        .filter_map(|asset| asset["name"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>();
+    assets.retain(|asset| {
+        let Some(name) = asset["name"].as_str() else {
+            return false;
+        };
+        asset["type"] != "character"
+            || !character_names.iter().any(|short| {
+                short != name && name.strip_prefix(short).is_some_and(is_name_boundary_tail)
+            })
+    });
+    assets
+}
+
+fn looks_like_object(name: &str) -> bool {
+    [
+        "公文包",
+        "笔记本",
+        "文件夹",
+        "手提包",
+        "钱包",
+        "背包",
+        "皮箱",
+        "日记本",
+    ]
+    .iter()
+    .any(|suffix| name.ends_with(suffix))
+}
+
+fn is_name_boundary_tail(tail: &str) -> bool {
+    ["一", "一下", "一把", "一个", "一起", "一边", "一眼"]
+        .iter()
+        .any(|boundary| tail == *boundary)
 }
 
 fn reviewed_asset(mut asset: Value, script: &str, evidence: &AssetEvidence) -> Option<Value> {

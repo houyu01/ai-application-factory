@@ -201,6 +201,7 @@ fn dispatch(service: &DesktopService, request: &ApiRequest) -> AppResult<(u16, V
         ("POST", ["projects", id, "video-exports"]) => {
             Ok((202, service.enqueue_video_export(id, body()?)?))
         }
+        ("GET", ["projects", id, "video-exports"]) => Ok((200, service.video_export_history(id)?)),
         ("GET", ["projects", id, "video-exports", task]) => {
             Ok((200, service.video_export_task(id, task)?))
         }
@@ -296,6 +297,8 @@ fn dispatch(service: &DesktopService, request: &ApiRequest) -> AppResult<(u16, V
             Ok((200, service.repository.create_prompt_template(body()?)?))
         }
         ("GET", ["settings", "models"]) => Ok((200, service.repository.model_configs()?)),
+        // Both Settings header actions use one all-or-nothing validation and persistence boundary.
+        ("POST", ["settings", "import"]) => Ok((200, service.import_settings(body()?)?)),
         ("PUT", ["settings", "models"]) => Ok((200, service.save_model_config(body()?)?)),
         ("PUT", ["settings", "models", kind, "options"]) => {
             Ok((200, service.repository.save_model_options(kind, body()?)?))

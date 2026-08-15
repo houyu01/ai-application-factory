@@ -1,17 +1,66 @@
 //! Standard `SKILL.md` discovery and execution envelopes for local domain agents.
 
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-    sync::OnceLock,
-};
+use std::{collections::BTreeMap, path::Path, sync::OnceLock};
+
+#[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
+use std::{fs, path::PathBuf};
 
 use serde_json::{json, Value};
 
 use crate::error::{AppError, AppResult};
 
 static REGISTRY: OnceLock<SkillRegistry> = OnceLock::new();
+
+const EMBEDDED_SKILLS: &[(&str, &str)] = &[
+    (
+        "drama/asset_prompt_generator/SKILL.md",
+        include_str!("../resources/skills/drama/asset_prompt_generator/SKILL.md"),
+    ),
+    (
+        "drama/continuity_checker/SKILL.md",
+        include_str!("../resources/skills/drama/continuity_checker/SKILL.md"),
+    ),
+    (
+        "drama/episode_planner/SKILL.md",
+        include_str!("../resources/skills/drama/episode_planner/SKILL.md"),
+    ),
+    (
+        "drama/episode_summarizer/SKILL.md",
+        include_str!("../resources/skills/drama/episode_summarizer/SKILL.md"),
+    ),
+    (
+        "drama/premise_expander/SKILL.md",
+        include_str!("../resources/skills/drama/premise_expander/SKILL.md"),
+    ),
+    (
+        "drama/scene_planner/SKILL.md",
+        include_str!("../resources/skills/drama/scene_planner/SKILL.md"),
+    ),
+    (
+        "drama/script_decomposer/SKILL.md",
+        include_str!("../resources/skills/drama/script_decomposer/SKILL.md"),
+    ),
+    (
+        "drama/script_writer/SKILL.md",
+        include_str!("../resources/skills/drama/script_writer/SKILL.md"),
+    ),
+    (
+        "drama/shot_prompt_generator/SKILL.md",
+        include_str!("../resources/skills/drama/shot_prompt_generator/SKILL.md"),
+    ),
+    (
+        "drama/story_bible_generator/SKILL.md",
+        include_str!("../resources/skills/drama/story_bible_generator/SKILL.md"),
+    ),
+    (
+        "drama/story_framework_researcher/SKILL.md",
+        include_str!("../resources/skills/drama/story_framework_researcher/SKILL.md"),
+    ),
+    (
+        "interactive_game/interactive_branch_planner/SKILL.md",
+        include_str!("../resources/skills/interactive_game/interactive_branch_planner/SKILL.md"),
+    ),
+];
 
 #[derive(Clone, Debug)]
 struct SkillDefinition {
@@ -28,8 +77,19 @@ struct SkillRegistry {
 }
 
 /// Load the bundle-owned skill directory before services or workers begin processing tasks.
+#[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
 pub(crate) fn initialize(directory: PathBuf) -> AppResult<()> {
     let registry = SkillRegistry::load(&directory)?;
+    install(registry)
+}
+
+/// Load compile-time skill content on mobile, where APK assets are URI-backed rather than files.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn initialize_embedded() -> AppResult<()> {
+    install(SkillRegistry::load_embedded()?)
+}
+
+fn install(registry: SkillRegistry) -> AppResult<()> {
     REGISTRY
         .set(registry)
         .map_err(|_| AppError::BadRequest("技能注册表已初始化".to_owned()))
@@ -73,11 +133,12 @@ pub(crate) fn game_branch_skill(arguments: Value) -> AppResult<Value> {
 
 fn registry() -> &'static SkillRegistry {
     REGISTRY.get_or_init(|| {
-        SkillRegistry::load(&development_skill_directory())
-            .expect("bundled SKILL.md files must be valid before a worker starts")
+        SkillRegistry::load_embedded()
+            .expect("embedded SKILL.md files must be valid before a worker starts")
     })
 }
 
+#[cfg(test)]
 fn development_skill_directory() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/skills")
 }
@@ -160,6 +221,7 @@ fn grouped_number(value: &Value) -> AppResult<String> {
 }
 
 impl SkillRegistry {
+    #[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
     fn load(directory: &Path) -> AppResult<Self> {
         let mut files = Vec::new();
         collect_skill_files(directory, &mut files)?;
@@ -179,6 +241,24 @@ impl SkillRegistry {
                 return Err(AppError::BadRequest(format!(
                     "skill 名称重复：{}",
                     file.display()
+                )));
+            }
+        }
+        Ok(Self { by_name })
+    }
+
+    fn load_embedded() -> AppResult<Self> {
+        let mut by_name = BTreeMap::new();
+        for (relative_path, source) in EMBEDDED_SKILLS {
+            let path = Path::new(relative_path);
+            let definition = parse_skill(source, path)?;
+            if by_name
+                .insert(definition.name.clone(), definition)
+                .is_some()
+            {
+                return Err(AppError::BadRequest(format!(
+                    "skill 名称重复：{}",
+                    path.display()
                 )));
             }
         }
@@ -207,6 +287,7 @@ impl SkillRegistry {
     }
 }
 
+#[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
 fn collect_skill_files(directory: &Path, files: &mut Vec<PathBuf>) -> AppResult<()> {
     for entry in fs::read_dir(directory)? {
         let path = entry?.path();
@@ -292,6 +373,16 @@ mod tests {
         );
         assert!(skill.instruction.contains("{target_min_chars}"));
         assert_eq!(registry.for_agent("drama").len(), 11);
+    }
+
+    #[test]
+    fn embedded_skills_load_without_a_runtime_resource_directory() {
+        let registry = SkillRegistry::load_embedded().expect("embedded skill registry");
+        assert_eq!(registry.by_name.len(), 12);
+        assert_eq!(registry.for_agent("drama").len(), 11);
+        registry
+            .named_for_agent("interactive_branch_planner", "interactive_game")
+            .expect("interactive game skill");
     }
 
     #[test]

@@ -150,7 +150,20 @@ fn batch_prompt(
     } else {
         "仅依据本批剧本拆解；不得访问外部资料或使用任何联网检索能力。"
     };
-    format!("你正在生成长剧的分镜骨架。{web_search_instruction}只返回合法 JSON：顶层包含 episodes 与 assets；episode 有 name、shots；shot 有 title、original_text、prompt、duration、references；references 每项有 asset_type、asset_name，角色处于非基础形态时额外有 variant_name。asset 有 id、type、name、source_evidence、prompt，角色额外有 voice_id、variants；每个 variant 有 name、prompt、episode_numbers。\n必须且只能拆解第{:03}至第{:03}集，不得合并、遗漏或新增集数。每集生成2至4条按顺序衔接的分镜；每条分镜默认 duration 为 10 秒；original_text 不超过{}字，只能来自该集的局部事件，不能复制整集或整剧。references 必须逐镜列出实际出现的场景、角色、道具；若角色处于幼年、少年、成年、老年、伤病、变身、换装或其他外观明显不同的形态，必须填写该角色对应 variant_name，绝不可只引用角色本体。每个 prompt 必须含有‘场景：’、‘角色：’、‘风格：’、‘光线：’、‘位置：’以及至少两个‘【镜头’段落，并使用 @图1（场景）、@图2（角色形态）、@图3（道具）形式预留参考图，文本需分段换行。项目创建配置：目标剧集数={}集；风格={}；题材={}；画幅={}；分辨率={}；分镜元素约束={}。{}{}\n人物首次出场规则：人物第一次在全剧清晰出场时，必须在其首个 original_text 保留或补写“【人物首次出场：当前名字｜人物描述：身份或关系、年龄/形态、2～3项稳定外观、当下情绪或动作】”，并同步写入 prompt 的对应镜头。该镜头还必须写入“【人物姓名标识｜姓名：当前名字｜时长：1～2s｜位置：人物近旁且不遮挡脸部｜效果：快速淡入淡出】”。姓名用当前剧情名或 character 的当前 name；姓名标识不是字幕，即使关闭字幕也必须保留，且同一人物只在首次出场展示一次。此前批次已确认出场的角色：{known_characters}；这些角色不得重复标记为首次出场。\n素材提取是本批的独立交付物：先覆盖阅读本批每一集，再逐项列出全部实际出现且可复用的角色、场景、道具。每个 asset 都必须有 source_evidence：从本批剧本逐字复制的、不超过48字的连续原文；它必须同时包含该 asset 的 name。name 只能是 source_evidence 中的实体原名，禁止截取对白、动作、形容词或任意连续字作为名称；不能证明为人物、实际剧情空间或关键物件时宁可不输出。角色必须是有姓名或稳定称谓且参与动作、对白、冲突或剧情推进的人物；场景必须是明确地点/空间，绝不能是对白、旁白、动作、情绪、镜头术语或时间天气；道具必须是被持有、使用、寻找、展示或推动剧情的具体物件。数量必须由文本中的实体数决定，不得按每类 2 个、每批 2 个或任意固定数量截断；不要用“主要角色”“关键道具”等泛称代替具体实体。角色 base prompt 写身份锚点与基础形态；只要剧本明确同一角色有两个或以上可视觉区分的生命阶段、身体状态、身份/服装状态或变身状态，就必须在该角色 variants 完整输出每个非基础形态，不得把幼年与成年合并为一张图，也不得只保留后期成年形态。variant prompt 必须独立写清年龄/阶段、脸型体态、发型、服装配饰、伤痕或状态变化，并说明与角色身份锚点保持同一人。每个素材 prompt 是该素材专属描述，不能使用公共提示词或剧本摘要：第一行写‘叙述背景主题：{}’；角色写身份、年龄性别、至少三项可观察性格行为以及脸型、眉眼、发型、体型、服装和配饰等稳定外观；场景写剧情用途、空间结构、陈设状态、色调光线、氛围，并限制无人物无背景文字；道具写叙事用途、颜色、材质、尺寸/形制、纹理磨损、装饰及表面文字限制。每位角色必须从下列音色 ID 选择最匹配的一项：broken_whisper_resilient_female、cold_boss_male、cool_career_newcomer_male、soft_puppy_boyfriend_male、sickly_gloomy_yandere_male、ruthless_old_fox_male、arrogant_genius_male、cool_abstinent_detective_female、warm_older_brother_male、sweet_cold_yandere_male、cold_royal_sister_female、strong_female_lead、mature_warm_goddess_female、sweet_fox_tease_female。\n本批剧本：\n{script}", batch[0].number,batch.last().map(|item|item.number).unwrap_or_default(),project["shot_script_max_chars"].as_i64().unwrap_or(400),project["episode_count"],project["style"].as_str().unwrap_or("真人风格"),project["theme"].as_str().unwrap_or("都市"),project["ratio"].as_str().unwrap_or("9:16"),project["resolution"].as_str().unwrap_or("720p"),project["shot_constraints"],if subtitles { "按剧情需要标注字幕信息。" } else { "不得出现字幕、屏幕文字或水印。" },if music { "可按剧情需要标注背景音乐。" } else { "不得出现背景音乐描述。" },project["theme"].as_str().unwrap_or("都市"))
+    format!(
+        "你正在生成长剧的分镜骨架。{web_search_instruction}只返回合法 JSON，不要 Markdown 或解释。顶层只能包含 episodes，禁止返回 assets；episode 有 name、shots；shot 有 title、original_text、prompt、duration、references；references 每项有 asset_type、asset_name，角色处于非基础形态时额外有 variant_name。\n必须且只能拆解第{:03}至第{:03}集，不得合并、遗漏或新增集数。每集生成2至4条按顺序衔接的分镜；每条分镜默认 duration 为 10 秒；original_text 不超过{}字，只能来自该集的局部事件，不能复制整集或整剧。references 必须逐镜列出实际出现的场景、角色、道具；若角色处于幼年、少年、成年、老年、伤病、变身、换装或其他外观明显不同的形态，必须填写对应 variant_name。每个 prompt 必须含有‘场景：’、‘角色：’、‘风格：’、‘光线：’、‘位置：’以及至少两个‘【镜头’段落，并使用 @图1（场景）、@图2（角色形态）、@图3（道具）形式预留参考图，文本需分段换行。不要在此请求中盘点或描述素材，素材目录由独立流程生成。\n项目创建配置：目标剧集数={}集；风格={}；题材={}；画幅={}；分辨率={}；分镜元素约束={}。{}{}\n人物首次出场规则：人物第一次在全剧清晰出场时，必须在其首个 original_text 保留或补写“【人物首次出场：当前名字｜人物描述：身份或关系、年龄/形态、2～3项稳定外观、当下情绪或动作】”，并同步写入 prompt 的对应镜头。该镜头还必须写入“【人物姓名标识｜姓名：当前名字｜时长：1～2s｜位置：人物近旁且不遮挡脸部｜效果：快速淡入淡出】”。姓名用当前剧情名；姓名标识不是字幕，即使关闭字幕也必须保留，且同一人物只在首次出场展示一次。此前批次已确认出场的角色：{known_characters}；这些角色不得重复标记为首次出场。\n本批剧本：\n{script}",
+        batch[0].number,
+        batch.last().map(|item| item.number).unwrap_or_default(),
+        project["shot_script_max_chars"].as_i64().unwrap_or(400),
+        project["episode_count"],
+        project["style"].as_str().unwrap_or("真人风格"),
+        project["theme"].as_str().unwrap_or("都市"),
+        project["ratio"].as_str().unwrap_or("9:16"),
+        project["resolution"].as_str().unwrap_or("720p"),
+        project["shot_constraints"],
+        if subtitles { "按剧情需要标注字幕信息。" } else { "不得出现字幕、屏幕文字或水印。" },
+        if music { "可按剧情需要标注背景音乐。" } else { "不得出现背景音乐描述。" },
+    )
 }
 
 /// Preserve the exact numbered script supplied to the model for later asset-evidence validation.
@@ -362,6 +375,8 @@ mod tests {
 
         assert!(!disabled.contains("web_search"));
         assert!(disabled.contains("仅依据本批剧本拆解"));
+        assert!(disabled.contains("禁止返回 assets"));
+        assert!(!disabled.contains("source_evidence"));
         assert!(enabled.contains("可使用 web_search"));
     }
 }

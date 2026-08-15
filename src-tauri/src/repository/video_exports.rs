@@ -154,4 +154,38 @@ impl Repository {
         }
         Ok(task)
     }
+
+    /// Return newest-first cloud archive links retained in successful durable export tasks.
+    pub fn video_export_history(&self, drama_id: &str) -> AppResult<Value> {
+        self.db.with_connection(|connection| {
+            let mut statement = connection.prepare(
+                "SELECT * FROM generation_tasks WHERE drama_id=?1 AND type='drama_video_export' AND status=?2 ORDER BY completed_at DESC,created_at DESC,id DESC",
+            )?;
+            let tasks = statement
+                .query_map(params![drama_id, SUCCEEDED], row_to_json)?
+                .collect::<Result<Vec<_>, _>>()?;
+            let entries = tasks
+                .into_iter()
+                .filter(|task| {
+                    task["input_snapshot"]["destination"].as_str() == Some("cloud")
+                        || (task["input_snapshot"]["destination"].is_null()
+                            && task["result"]["url"]
+                                .as_str()
+                                .is_some_and(|url| url.starts_with("http://") || url.starts_with("https://")))
+                })
+                .filter_map(|task| {
+                    let result = &task["result"];
+                    let url = result["url"].as_str()?.to_owned();
+                    Some(json!({
+                        "task_id": task["id"],
+                        "url": url,
+                        "file_name": result["file_name"],
+                        "created_at": task["created_at"],
+                        "completed_at": task["completed_at"],
+                    }))
+                })
+                .collect::<Vec<_>>();
+            Ok(Value::Array(entries))
+        })
+    }
 }

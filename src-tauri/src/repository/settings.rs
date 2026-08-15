@@ -11,6 +11,34 @@ use crate::{
 use super::Repository;
 
 impl Repository {
+    /// Atomically replace all four model settings and storage after the service has probed every candidate.
+    pub(crate) fn save_imported_settings(
+        &self,
+        models: Vec<Map<String, Value>>,
+        storage: Map<String, Value>,
+    ) -> AppResult<Value> {
+        self.db.with_connection(|connection| {
+            let transaction = connection.unchecked_transaction()?;
+            let timestamp = now();
+            for model in &models {
+                let kind = string(model, "kind", "");
+                transaction.execute(
+                    "INSERT INTO app_settings (key,value_json,updated_at) VALUES (?1,?2,?3) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+                    params![kind, json_text(&Value::Object(model.clone())), timestamp],
+                )?;
+            }
+            transaction.execute(
+                "INSERT INTO app_settings (key,value_json,updated_at) VALUES ('storage',?1,?2) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at",
+                params![json_text(&Value::Object(storage)), timestamp],
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })?;
+        Ok(
+            json!({"status":"saved","models":self.model_configs()?,"storage":self.storage_config()?}),
+        )
+    }
+
     /// List prompt templates filtered as requested by the rich-prompt editor.
     pub fn prompt_templates(
         &self,

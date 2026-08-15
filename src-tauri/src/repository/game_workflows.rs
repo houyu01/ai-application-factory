@@ -249,27 +249,32 @@ impl Repository {
         self.get_game_task(&task_id)
     }
 
-    /// Stop only the active screenplay expansion, preserving streamed text for a later editor-triggered retry.
+    /// Stop the active screenplay or graph task while preserving its streamed checkpoints.
     pub fn cancel_game_screenplay(&self, game_id: &str) -> AppResult<Value> {
         let task = self.db.with_connection(|connection| {
             connection
                 .query_row(
-                    "SELECT * FROM game_tasks WHERE game_id=?1 AND type='game_script_expansion' ORDER BY created_at DESC LIMIT 1",
+                    "SELECT * FROM game_tasks WHERE game_id=?1 AND type IN ('game_script_expansion','game_graph_decomposition') ORDER BY created_at DESC LIMIT 1",
                     [game_id],
                     row_to_json,
                 )
                 .optional()?
                 .map(mapping::game_task)
-                .ok_or_else(|| AppError::BadRequest("未找到可停止的剧本扩写任务".to_owned()))
+                .ok_or_else(|| AppError::BadRequest("未找到可停止的生成任务".to_owned()))
         })?;
         match task["status"].as_str() {
             Some(CANCELLED) => Ok(task),
             Some(GENERATING) => {
                 let id = task["id"].as_str().unwrap_or_default();
+                let stage = if task["type"].as_str() == Some("game_graph_decomposition") {
+                    "图谱生成已停止，当前进度已保存"
+                } else {
+                    "剧本扩写已停止，当前进度已保存"
+                };
                 self.db.with_connection(|connection| {
                     connection.execute(
-                        "UPDATE game_tasks SET status=?1,stage='剧本扩写已停止',completed_at=?2,poll_lease_until=NULL,poll_lease_token=NULL WHERE id=?3 AND status=?4",
-                        params![CANCELLED, now(), id, GENERATING],
+                        "UPDATE game_tasks SET status=?1,stage=?2,completed_at=?3,poll_lease_until=NULL,poll_lease_token=NULL WHERE id=?4 AND status=?5",
+                        params![CANCELLED, stage, now(), id, GENERATING],
                     )?;
                     connection.execute(
                         "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id=?3",
@@ -279,7 +284,7 @@ impl Repository {
                 })?;
                 self.get_game_task(id)
             }
-            _ => Err(AppError::BadRequest("剧本扩写已完成，无法停止".to_owned())),
+            _ => Err(AppError::BadRequest("生成任务已完成，无法停止".to_owned())),
         }
     }
 

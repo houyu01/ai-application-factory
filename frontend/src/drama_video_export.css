@@ -40,7 +40,28 @@
 .drama-video-export-head h2 { margin: 0; font-size: 22px; }
 .drama-video-export-head p { margin: 7px 0 0; color: #74767b; font-size: 13px; line-height: 1.55; }
 .drama-video-export-head .close { flex: 0 0 auto; }
-.drama-video-export-form { padding: 20px 32px 8px; }
+.drama-video-export-form { max-height: calc(100vh - 235px); padding: 20px 32px 8px; overflow: auto; }
+
+.drama-video-export-history {
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid #e5e5e2;
+  border-radius: 9px;
+  background: #fafaf8;
+}
+
+.drama-video-export-history h3 { margin: 0 0 10px; font-size: 14px; }
+.drama-video-export-history [data-video-export-history-list] { display: flex; flex-direction: column; gap: 6px; max-height: 118px; overflow: auto; }
+.drama-video-export-history-empty { margin: 2px 0; color: #85878d; font-size: 12px; }
+.drama-video-export-history-link { display: flex; justify-content: space-between; gap: 16px; padding: 8px 10px; border-radius: 7px; background: #fff; color: #b65e13; font-size: 12px; text-decoration: none; }
+.drama-video-export-history-link:hover { text-decoration: underline; }
+.drama-video-export-history-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drama-video-export-history-link small { flex: 0 0 auto; color: #85878d; }
+
+.drama-video-export-destination { display: grid; grid-template-columns: 90px minmax(0, 240px) minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 18px; }
+.drama-video-export-destination > span { font-size: 13px; font-weight: 700; }
+.drama-video-export-destination select { box-sizing: border-box; width: 100%; height: 36px; border: 1px solid #dadbd8; border-radius: 7px; background: #fff; color: inherit; padding: 0 10px; font: inherit; }
+.drama-video-export-destination small { color: #85878d; font-size: 11px; line-height: 1.4; }
 
 .drama-video-export-format {
   display: flex;
@@ -135,6 +156,9 @@
 :root[data-theme='dark'] .drama-video-export-progress > span { color: #adb1ba; }
 
 :root[data-theme='dark'] .drama-video-export-shot { border-color: #41454c; background: #191b1f; }
+:root[data-theme='dark'] .drama-video-export-history { border-color: #41454c; background: #191b1f; }
+:root[data-theme='dark'] .drama-video-export-history-link { background: #121417; }
+:root[data-theme='dark'] .drama-video-export-destination select { border-color: #454951; background: #121417; color: #f2f3f5; }
 :root[data-theme='dark'] .drama-video-export-shot select { border-color: #454951; background: #121417; color: #f2f3f5; }
 :root[data-theme='dark'] .drama-video-export-shot.missing { color: #adb1ba; }
 :root[data-theme='dark'] .drama-video-export-shot.missing select { color: #adb1ba; }
@@ -148,6 +172,7 @@
   .drama-video-export-actions { padding-left: 20px; padding-right: 20px; }
 
   .drama-video-export-format { gap: 10px 14px; }
+  .drama-video-export-destination { grid-template-columns: 1fr; gap: 6px; }
   .drama-video-export-format-label { width: 100%; }
   .drama-video-export-shot { grid-template-columns: 1fr; }
   .drama-video-export-progress-copy { flex-direction: column; gap: 4px; }
