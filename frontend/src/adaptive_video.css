@@ -1,0 +1,40 @@
+/* Shared playback surface for drama previews, refinements, and interactive-game videos. */
+
+.adaptive-video-shell {
+  --adaptive-video-aspect: 16 / 9;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  max-height: min(72vh, 720px);
+  margin-inline: auto;
+  overflow: hidden;
+  aspect-ratio: var(--adaptive-video-aspect);
+  border-radius: var(--ui-radius-surface, 8px);
+  background: #08090b;
+}
+
+.adaptive-video-shell[data-video-orientation='portrait'] { max-width: 520px; }
+.adaptive-video-shell[data-video-orientation='square'] { max-width: 720px; }
+
+.adaptive-video-shell > video[controls] {
+  grid-area: 1 / 1;
+  display: block;
+  box-sizing: border-box;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  aspect-ratio: auto !important;
+  object-fit: contain !important;
+  background: #08090b;
+}
+
+.drama-video-refinement-modal > .adaptive-video-shell { margin-top: 20px; }
+.game-node-video-refinement-modal > .adaptive-video-shell { margin-block: 14px; }
+.game-node-video-preview > .adaptive-video-shell { margin-top: 12px; }
+
+@media (max-width: 640px) {
+  .adaptive-video-shell { max-height: 76vh; }
+}

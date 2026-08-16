@@ -8,6 +8,7 @@ import { dramaShotVideoStatus } from './drama_video_history.js';
 import { hasUnsavedDramaEditorChanges } from './drama_editor_autosave.js';
 import { refreshDramaVideoBatchGeneration } from './drama_video_batch_generation_ui.js';
 import { replaceDramaAssetDrawer } from './drama_asset_drawer_refresh.js';
+import { captureCurrentDramaScrollState, scheduleDramaScrollRestore } from './drama_scroll_restore.js';
 import type { ApiProject, GenerationTask } from './models.js';
 
 type PartialRefreshRuntime = {
@@ -123,6 +124,7 @@ function bindVideoHistory(project: ApiProject) {
 }
 
 function refreshVideoPanel(project: ApiProject) {
+  const scrollState = captureCurrentDramaScrollState(true);
   const wrapper = document.createElement('div');
   wrapper.innerHTML = core.dramaDetailMarkup(project);
   const next = wrapper.querySelector<HTMLElement>('.drama-video-panel');
@@ -132,6 +134,7 @@ function refreshVideoPanel(project: ApiProject) {
     bindVideoHistory(project);
     const shot = core.dramaSelectedShot(project);
     if (shot) core.enhanceDramaShotEditor(project, shot);
+    scheduleDramaScrollRestore(scrollState);
   }
 }
 
