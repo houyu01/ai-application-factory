@@ -1,4 +1,6 @@
 import './style.css'; import './generation_elapsed.css'; import './tablet_safe_area.css'; import './home_model_configuration_notice.css'; import './game_materials.css'; import './game_graph_canvas.css'; import './game_graph_fullscreen.css'; import './voice_catalog.css'; import './settings_import.css'; import './settings_scroll_restore.js'; import './game_player.css'; import { apiBaseUrl } from './desktop_api.js';
+import './adaptive_video.css';
+import { installAdaptiveVideoPlayers } from './adaptive_video.js';
 import { toast } from './toast.js';
 import './drama_project_restart_ui.js';
 import { configureDramaEditorAutosave, flushDramaEditorAutosave } from './drama_editor_autosave.js';
@@ -26,6 +28,7 @@ import { configureSettingsImportRuntime, settingsImportActionsMarkup } from './s
 const { dramaAssets, dramaAssetDrawer, dramaKindLabel, dramaSelectedShot, dramaShots, openAssetPublicPromptModal, resolveMediaUrl, setGenerationButtonLoading, loadDramaDetail: loadDramaDetailCore, loadDramaProjects, deleteDramaProject } = dramaCore;
 const { bindDramaWorkspace, storageEndpointPlaceholder, storageField, storageProviderStatus } = dramaModal;
 const API_BASE_URL = apiBaseUrl();
+installAdaptiveVideoPlayers();
 const copy = {
   workspace: { zh: '创作空间 / AI 应用平台', en: 'WORKSPACE / AI PLATFORM' },
   homeTitle: { zh: '选择工作台', en: 'Choose a workbench' },
