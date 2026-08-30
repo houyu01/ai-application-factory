@@ -56,20 +56,60 @@ fn graph_generation_start(checkpoint: &Value, stage: planner::GameGraphStage) ->
     }
 }
 
+/// Map the current model call onto a stage band so a later batch cannot rewind the meter to 90%→42%.
+fn graph_stream_progress(
+    stage: planner::GameGraphStage,
+    checkpoint: &Value,
+    received_chars: usize,
+) -> i64 {
+    let saved = |key| checkpoint[key].as_array().map_or(0, Vec::len) as i64;
+    let stream = |divisor: i64, cap: i64| (received_chars as i64 / divisor).min(cap);
+    match stage {
+        planner::GameGraphStage::Assets => (8 + stream(40, 32)).min(40),
+        planner::GameGraphStage::Nodes => (42 + saved("nodes").min(20) + stream(200, 4)).min(66),
+        planner::GameGraphStage::Edges => (68 + stream(80, 22)).min(90),
+    }
+}
+
 impl DurableWorker {
-    /// Convert the saved expansion into a validated DAG so later node-video work can progress independently.
+    /// Convert a structured expansion into a playable DAG without asking the model to invent topology.
     ///
-    /// The worker asks for assets, nodes, and edges in distinct schema-shaped calls. Each completed
-    /// stage is checkpointed before the next call, so a malformed edge never regenerates materials.
+    /// Screenplay Sxx/Exx/前往 links are compiled first. Missing optional branches are omitted so
+    /// the creator can add them later, but the worker never persists a DAG that cannot be played.
     pub(super) fn decompose_game_graph(&self, task_id: &str, game_id: &str) -> AppResult<()> {
         let game = self.repository.get_game(game_id)?;
         let task = self.repository.get_game_task(task_id)?;
         if let Some(plan) = completed_graph_checkpoint(&task) {
-            self.repository.update_game_task_progress(
+            self.repository.advance_game_task_progress(
                 task_id,
-                82,
+                92,
                 "已读取保存的图谱骨架，正在写入视频节点",
             )?;
+            return self.save_game_graph_checkpoint(task_id, game_id, &plan);
+        }
+        let screenplay = game["expanded_script"]
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| game["script"].as_str().unwrap_or_default());
+        if let Some(plan) = planner::compile_game_plan(screenplay, &game) {
+            let node_count = plan["nodes"].as_array().map_or(0, Vec::len);
+            let edge_count = plan["edges"].as_array().map_or(0, Vec::len);
+            self.persist_game_graph_preview(
+                task_id,
+                game_id,
+                &plan.to_string(),
+                &plan,
+                planner::GameGraphStage::Edges,
+                None,
+                0,
+            )?;
+            self.repository.advance_game_task_progress(
+                task_id,
+                92,
+                &format!("已根据剧本编译可玩图谱（{node_count} 个节点、{edge_count} 条选择边），正在写入视频节点"),
+            )?;
+            self.repository
+                .persist_game_graph_checkpoint(task_id, game_id, &plan)?;
             return self.save_game_graph_checkpoint(task_id, game_id, &plan);
         }
         let mut progress_checkpoint = progress_graph_checkpoint(&task);
@@ -80,11 +120,7 @@ impl DurableWorker {
         let stage = planner::game_graph_stage(&progress_checkpoint, &game);
         let (start_progress, start_stage) = graph_generation_start(&progress_checkpoint, stage);
         self.repository
-            .update_game_task_progress(task_id, start_progress, &start_stage)?;
-        let screenplay = game["expanded_script"]
-            .as_str()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| game["script"].as_str().unwrap_or_default());
+            .advance_game_task_progress(task_id, start_progress, &start_stage)?;
         let skill = skills::game_branch_skill(json!({
             "branch_min": game["branch_min"],
             "branch_max": game["branch_max"],
@@ -217,7 +253,7 @@ impl DurableWorker {
             );
         }
         self.repository
-            .update_game_task_progress(task_id, 82, "正在复核选择边与完整 DAG 约束")?;
+            .advance_game_task_progress(task_id, 91, "正在复核选择边与完整 DAG 约束")?;
         let Some(plan) = planner::model_game_plan(&checkpoint.to_string(), &game) else {
             let feedback =
                 planner::game_graph_edge_feedback(&progress_checkpoint, &response, &game);
@@ -270,7 +306,7 @@ impl DurableWorker {
         let received_chars = preview.chars().count();
         let node_count = checkpoint["nodes"].as_array().map_or(0, Vec::len);
         let edge_count = checkpoint["edges"].as_array().map_or(0, Vec::len);
-        let progress = (65 + (received_chars / 80).min(25) as i64).min(90);
+        let progress = graph_stream_progress(stage, checkpoint, received_chars);
         self.repository.persist_game_graph_preview_state(
             task_id,
             &json!({
@@ -299,7 +335,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{graph_generation_start, graph_preview_write_due};
+    use super::{graph_generation_start, graph_preview_write_due, graph_stream_progress};
     use crate::planner::GameGraphStage;
 
     #[test]
@@ -316,6 +352,21 @@ mod tests {
         assert_eq!(progress, 68);
         assert!(stage.contains("玩家选择边"));
         assert!(stage.contains("2 个节点"));
+    }
+
+    #[test]
+    fn node_stream_stays_in_the_node_band_instead_of_hitting_ninety() {
+        let checkpoint = json!({"assets":[{"id":"hero"}],"nodes":[{"id":"start"}],"edges":[]});
+
+        assert!(graph_stream_progress(GameGraphStage::Nodes, &checkpoint, 8_000) <= 66);
+        assert_eq!(
+            graph_stream_progress(GameGraphStage::Edges, &json!({"nodes":[{},{}]}), 80),
+            69
+        );
+        assert_eq!(
+            graph_stream_progress(GameGraphStage::Edges, &json!({}), 10_000),
+            90
+        );
     }
 
     #[test]

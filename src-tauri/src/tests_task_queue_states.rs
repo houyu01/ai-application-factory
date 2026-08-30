@@ -213,3 +213,80 @@ fn restart_marks_in_progress_game_generation_failed() {
         .contains("无法恢复"));
     fs::remove_dir_all(root).expect("remove test data");
 }
+
+#[test]
+fn get_game_shows_generating_while_graph_decomposition_is_still_running() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let repository = Repository::new(
+        Database::open(root.join("ai_application_factory.db")).expect("test database"),
+    );
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("列表状态不同步")),
+            (
+                "script".to_owned(),
+                json!("玩家在钟楼发现失踪同伴的录音，需要在警报响起前找出出口。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    repository
+        .complete_game_screenplay_expansion(
+            game["task"]["id"].as_str().expect("expansion task"),
+            game_id,
+            "【剧情段 S01｜开始】\n【玩家抉择】\n【结局 E01｜成功】\n【结局 E02｜失败】",
+            20,
+            true,
+        )
+        .expect("queue graph task");
+    repository
+        .set_game_status(game_id, FAILED)
+        .expect("stale failed card");
+
+    let recovered = repository.get_game(game_id).expect("heal list status");
+    assert_eq!(recovered["status"], GENERATING);
+    assert!(recovered["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .any(|task| task["type"] == "game_graph_decomposition" && task["status"] == GENERATING));
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn retry_game_generation_restarts_the_elapsed_timer() {
+    let root = std::env::temp_dir().join(format!("ai-application-factory-{}", new_id()));
+    let path = root.join("ai_application_factory.db");
+    let database = Database::open(path).expect("test database");
+    let repository = Repository::new(database.clone());
+    let game = repository
+        .create_game(Map::from_iter([
+            ("name".to_owned(), json!("重试计时")),
+            (
+                "script".to_owned(),
+                json!("玩家在钟楼发现失踪同伴的录音，需要在警报响起前找出出口。"),
+            ),
+        ]))
+        .expect("create game");
+    let game_id = game["id"].as_str().expect("game id");
+    let task_id = game["task"]["id"].as_str().expect("task id");
+    repository
+        .finish_game_task(task_id, FAILED, None, Some("语言模型暂时不可用"))
+        .expect("mark failure");
+    database
+        .with_connection(|connection| {
+            connection.execute(
+                "UPDATE game_tasks SET started_at='2026-08-01T00:00:00.000000Z' WHERE id=?1",
+                [task_id],
+            )?;
+            Ok(())
+        })
+        .expect("age the original stopwatch");
+    let retried = repository.retry_game_generation(game_id).expect("retry");
+    assert_eq!(retried["status"], GENERATING);
+    assert_ne!(
+        retried["started_at"].as_str().expect("retry start"),
+        "2026-08-01T00:00:00.000000Z"
+    );
+    fs::remove_dir_all(root).expect("remove test data");
+}

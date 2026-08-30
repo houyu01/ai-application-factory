@@ -22,6 +22,13 @@ test('generation stopwatch includes page changes and application downtime', () =
   assert.equal(generationElapsedMs('2026-08-14T10:00:00.000Z', now), 3_661_000);
 });
 
+test('timezone-less UTC timestamps are not read as local wall-clock', () => {
+  const now = Date.parse('2026-08-28T16:15:00.000Z');
+  assert.equal(generationElapsedMs('2026-08-28T16:00:00.123456Z', now), 899_877);
+  assert.equal(generationElapsedMs('2026-08-28T16:00:00.123456', now), 899_877);
+  assert.equal(generationElapsedMs('2026-08-28 16:00:00', now), 900_000);
+});
+
 test('legacy tasks without a timestamp restart from the current instant', () => {
   assert.equal(generationElapsedMs(undefined, 12_345), 0);
 });

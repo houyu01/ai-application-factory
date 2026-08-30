@@ -1,0 +1,17 @@
+{
+  "description": "互动视频游戏微信小游戏模板",
+  "packOptions": {
+    "ignore": []
+  },
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "minified": false
+  },
+  "compileType": "game",
+  "libVersion": "3.8.0",
+  "appid": "touristappid",
+  "projectname": "mist-city-choice",
+  "condition": {}
+}

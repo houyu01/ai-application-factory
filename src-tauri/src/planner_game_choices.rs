@@ -38,6 +38,14 @@ pub(crate) fn is_meaningful_choice_label(value: &str) -> bool {
         && !numbered_placeholder(&compact)
 }
 
+pub(super) fn fallback_choice_label(option: &str, target_title: &str) -> String {
+    let option = option.trim();
+    if is_meaningful_choice_label(option) {
+        return option.to_owned();
+    }
+    format!("前往「{target_title}」")
+}
+
 pub(crate) fn choice_label_key(value: &str) -> String {
     value
         .chars()

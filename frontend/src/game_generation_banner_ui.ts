@@ -3,6 +3,7 @@
 import type { Game, GameTask } from './models.js';
 import {
   generationElapsedTitleMarkup,
+  parseGenerationTimestampMs,
   syncGenerationElapsedTitle,
 } from './generation_elapsed_ui.ts';
 
@@ -38,7 +39,7 @@ function taskProgress(task: GameTask) {
 
 function currentStep(task: GameTask, graphPlanning: boolean, progress: number) {
   if (!graphPlanning) return progress >= 5 ? 1 : 0;
-  return progress >= 92 || /保存|写入|持久|校验未通过|补齐/.test(task.stage || '') ? 3 : 2;
+  return progress >= 92 || /图谱骨架已保存|正在写入视频节点|正在复核选择边|校验未通过|仅重新生成选择边/.test(task.stage || '') ? 3 : 2;
 }
 
 /** Keep script expansion and its automatically queued graph decomposition on one stopwatch. */
@@ -60,11 +61,29 @@ function generationTimerStartedAt(game: Game, task: GameTask) {
     for (let index = taskIndex - 1; index >= 0; index -= 1) {
       const previous = tasks[index];
       if (previous.type === 'game_script_expansion') {
-        return previous.started_at || previous.created_at;
+        const graphStart = task.started_at || task.created_at;
+        return followsExpansionRun(previous, graphStart)
+          ? previous.started_at || previous.created_at
+          : graphStart;
       }
     }
   }
   return task.started_at || task.created_at;
+}
+
+/** Share one stopwatch across expansion → graph, but restart after an independent graph retry. */
+function followsExpansionRun(expansion: GameTask, graphStart?: string | null) {
+  if (!expansion.completed_at) return true;
+  const graphMs = parseGenerationTimestampMs(graphStart);
+  const expansionEndMs = parseGenerationTimestampMs(expansion.completed_at);
+  if (!Number.isFinite(graphMs) || !Number.isFinite(expansionEndMs)) return true;
+  return Math.abs(graphMs - expansionEndMs) <= 10 * 60_000;
+}
+
+/** List cards and the canvas badge follow live bootstrap tasks, not a stale aggregate row. */
+export function gameFlowStatus(game: Game) {
+  const task = generationTask(game);
+  return task?.status === '生成中' ? '生成中' : game.status;
 }
 
 /** Derive creator-visible live output from the durable task snapshot and saved screenplay. */

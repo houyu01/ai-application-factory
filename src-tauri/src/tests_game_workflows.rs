@@ -1,9 +1,10 @@
 //! Regression coverage for the interactive-game expansion and DAG creation workflow.
 use crate::{
     db::Database,
-    planner,
+    media::MediaStore,
     repository::Repository,
     value::{new_id, CANCELLED, FAILED, GENERATING, SUCCEEDED},
+    worker::DurableWorker,
 };
 use serde_json::{json, Map};
 use std::fs;
@@ -54,15 +55,13 @@ fn game_creation_checkpoints_expansion_before_saving_a_playable_graph() {
         .expect("tasks")
         .iter()
         .any(|task| task["type"] == "game_graph_decomposition" && task["status"] == GENERATING));
-    let plan = planner::fallback_game_plan(&expanded);
-    repository
-        .save_game_graph(
-            game_id,
-            plan["assets"].as_array().expect("assets"),
-            plan["nodes"].as_array().expect("nodes"),
-            plan["edges"].as_array().expect("edges"),
-        )
-        .expect("save graph fixture");
+    assert!(DurableWorker::new(
+        repository.clone(),
+        MediaStore::new(repository.clone()).expect("media store"),
+    )
+    .expect("worker")
+    .process_once()
+    .expect("compile graph from screenplay"));
     let planned = repository.get_game(game_id).expect("planned game");
     assert_eq!(planned["status"], SUCCEEDED);
     let nodes = planned["nodes"].as_array().expect("nodes");
