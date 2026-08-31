@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUTPUT_DIR="$ROOT_DIR/frontend/public/interactive-game-demo/media"
+OUTPUT_DIR="$ROOT_DIR/game-template/html/media"
 mkdir -p "$OUTPUT_DIR"
 
 make_clip() {
@@ -26,5 +26,13 @@ make_clip "05-truth.mp4" "0x283b38" "看见天光" "完整证据让雾城迎来�
 make_clip "06-dawn.mp4" "0x384033" "带她离开" "第一班晨车在雾外等待" "0xf0cb80" 5
 make_clip "07-echo.mp4" "0x34252d" "回声尽头" "错误的脚步声吞没了出口" "0xe98978" 5
 make_clip "08-silence.mp4" "0x202124" "沉入雾中" "纸条在雨水里失去了最后一个字" "0x8794a8" 5
+
+for extra in \
+  "$ROOT_DIR/game-template/html/mist-city-choice-mac-player/media" \
+  "$ROOT_DIR/game-template/minigame/media"
+do
+  mkdir -p "$extra"
+  cp "$OUTPUT_DIR"/*.mp4 "$extra/"
+done
 
 echo "Generated 8 interactive game videos in $OUTPUT_DIR"

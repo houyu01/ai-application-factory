@@ -92,7 +92,7 @@ impl Repository {
     ) -> AppResult<()> {
         self.db.with_connection(|connection| {
             if connection.execute(
-                "UPDATE game_tasks SET input_snapshot_json=?1,progress=82,stage='图谱骨架已保存，等待写入视频节点' WHERE id=?2 AND game_id=?3 AND type='game_graph_decomposition' AND status=?4",
+                "UPDATE game_tasks SET input_snapshot_json=?1,progress=92,stage='图谱骨架已保存，等待写入视频节点' WHERE id=?2 AND game_id=?3 AND type='game_graph_decomposition' AND status=?4",
                 params![json_text(&json!({"game_id":game_id,"graph_checkpoint":plan})), task_id, game_id, GENERATING],
             )? == 0 {
                 return Err(AppError::BadRequest("图谱生成已停止".to_owned()));
@@ -122,10 +122,32 @@ impl Repository {
         })
     }
 
+    /// Raise graph-decomposition progress without rewinding a later batch or validation retry.
+    pub(crate) fn advance_game_task_progress(
+        &self,
+        task_id: &str,
+        progress: i64,
+        stage: &str,
+    ) -> AppResult<()> {
+        self.db.with_connection(|connection| {
+            if connection.execute(
+                "UPDATE game_tasks SET progress=MAX(progress, ?1),stage=?2 WHERE id=?3 AND status=?4",
+                params![progress.clamp(0, 99), stage, task_id, GENERATING],
+            )? == 0
+            {
+                return Err(AppError::BadRequest(format!(
+                    "Game task is no longer active: {task_id}"
+                )));
+            }
+            Ok(())
+        })
+    }
+
     /// Atomically persist a graph stream preview, its accepted records, and visible progress.
     ///
     /// The graph worker calls this at its throttled stream boundary so one checkpoint produces one
-    /// SQLite write instead of separate snapshot and progress updates.
+    /// SQLite write instead of separate snapshot and progress updates. Progress only moves forward
+    /// so a later node batch or edge retry cannot rewind the workbench meter.
     pub(crate) fn persist_game_graph_preview_state(
         &self,
         task_id: &str,
@@ -135,7 +157,7 @@ impl Repository {
     ) -> AppResult<()> {
         self.db.with_connection(|connection| {
             if connection.execute(
-                "UPDATE game_tasks SET input_snapshot_json=?1,progress=?2,stage=?3 WHERE id=?4 AND type='game_graph_decomposition' AND status=?5",
+                "UPDATE game_tasks SET input_snapshot_json=?1,progress=MAX(progress, ?2),stage=?3 WHERE id=?4 AND type='game_graph_decomposition' AND status=?5",
                 params![json_text(snapshot), progress.clamp(0, 99), stage, task_id, GENERATING],
             )? == 0
             {

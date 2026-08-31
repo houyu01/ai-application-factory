@@ -3,7 +3,7 @@
 import { syncGameSelectedNode } from './game_materials_ui.js';
 import { syncGameCoverUi } from './game_cover_ui.js';
 import { syncGamePlaceholderUi } from './game_placeholder_ui.js';
-import { syncGameGenerationBanner } from './game_generation_banner_ui.js';
+import { syncGameGenerationBanner, gameFlowStatus } from './game_generation_banner_ui.js';
 import type { Game, GameTask, VoicePreset } from './models.js';
 import { gameNodeTaskIsGenerating } from './game_graph_canvas.js';
 import { gameGraphSignature, mergeGameTaskSnapshot } from './game_task_refresh_state.js';
@@ -41,7 +41,7 @@ function syncGraphTaskState(game: Game) {
   const nodes = game.nodes || [];
   const summary = main.querySelector<HTMLElement>('.game-canvas-panel .panel-title p');
   if (summary) summary.textContent = `${nodes.length} 个视频节点 · ${game.edges?.length || 0} 条选择边`;
-  syncStatus(main.querySelector<HTMLElement>('.game-canvas-panel .panel-title > .status'), game.status);
+  syncStatus(main.querySelector<HTMLElement>('.game-canvas-panel .panel-title > .status'), gameFlowStatus(game));
   const nodesById = new Map(nodes.map(node => [node.id, node]));
   main.querySelectorAll<HTMLElement>('[data-game-node]').forEach(card => {
     const node = nodesById.get(card.dataset.gameNode || '');

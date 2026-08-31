@@ -11,6 +11,8 @@ use crate::{
 
 use super::{parse_json_object, review_assets};
 
+#[path = "planner_game_accept.rs"]
+mod accept;
 #[path = "planner_game_checkpoint.rs"]
 mod checkpoint;
 #[cfg(test)]
@@ -18,6 +20,10 @@ mod checkpoint;
 mod checkpoint_tests;
 #[path = "planner_game_choices.rs"]
 mod choices;
+#[path = "planner_game_compile.rs"]
+mod compile;
+#[path = "planner_game_compile_graph.rs"]
+mod compile_graph;
 #[path = "planner_game_expansion.rs"]
 mod expansion;
 #[cfg(test)]
@@ -25,15 +31,21 @@ mod expansion;
 mod fallback;
 #[path = "planner_game_materials.rs"]
 mod materials;
+#[path = "planner_game_screenplay.rs"]
+mod screenplay;
 #[path = "planner_game_stages.rs"]
 mod stages;
 
+pub(crate) use accept::playable_game_plan;
 pub(crate) use checkpoint::game_graph_progress_checkpoint;
 #[cfg(test)]
 pub(crate) use checkpoint::{merge_game_graph_resume, resume_game_graph_prompt};
 #[cfg(test)]
 use choices::CHOICE_LABEL_CONTRACT;
 use choices::{choice_label_key, is_meaningful_choice_label};
+pub(crate) use compile::compile_game_plan;
+#[cfg(test)]
+pub(crate) use expansion::fallback_game_expansion;
 pub(crate) use expansion::game_expansion_prompt;
 #[cfg(test)]
 pub(crate) use fallback::fallback_game_plan;
@@ -259,10 +271,51 @@ fn graph_is_playable(kinds: &HashMap<String, String>, edges: &[Value], game: &Va
             return None;
         }
     }
+    reachable_playable_dag(kinds, &outgoing, &incoming)
+}
+
+fn graph_is_usable(kinds: &HashMap<String, String>, edges: &[Value], game: &Value) -> Option<()> {
+    let mut outgoing = HashMap::<String, Vec<String>>::new();
+    let mut incoming = HashMap::<String, Vec<String>>::new();
+    for edge in edges {
+        let source = edge["source_node_id"].as_str()?.to_owned();
+        let target = edge["target_node_id"].as_str()?.to_owned();
+        outgoing
+            .entry(source.clone())
+            .or_default()
+            .push(target.clone());
+        incoming.entry(target).or_default().push(source);
+    }
+    let maximum = integer(
+        game,
+        "branch_max",
+        4,
+        integer(game, "branch_min", 2, 2, 4),
+        4,
+    ) as usize;
+    for (id, kind) in kinds {
+        let count = outgoing.get(id).map_or(0, Vec::len);
+        let valid_count = match kind.as_str() {
+            "success" | "failure" => count == 0,
+            "start" | "normal" => (1..=maximum).contains(&count),
+            _ => false,
+        };
+        if !valid_count {
+            return None;
+        }
+    }
+    reachable_playable_dag(kinds, &outgoing, &incoming)
+}
+
+fn reachable_playable_dag(
+    kinds: &HashMap<String, String>,
+    outgoing: &HashMap<String, Vec<String>>,
+    incoming: &HashMap<String, Vec<String>>,
+) -> Option<()> {
     let start = kinds
         .iter()
         .find_map(|(id, kind)| (kind == "start").then_some(id))?;
-    let reached = traversal(start, &outgoing);
+    let reached = traversal(start, outgoing);
     if reached.len() != kinds.len() {
         return None;
     }
@@ -273,9 +326,9 @@ fn graph_is_playable(kinds: &HashMap<String, String>, edges: &[Value], game: &Va
         .collect::<Vec<_>>();
     let mut reaches_end = HashSet::new();
     for ending in endings {
-        reaches_end.extend(traversal(&ending, &incoming));
+        reaches_end.extend(traversal(&ending, incoming));
     }
-    (reaches_end.len() == kinds.len() && !has_cycle(kinds, &outgoing)).then_some(())
+    (reaches_end.len() == kinds.len() && !has_cycle(kinds, outgoing)).then_some(())
 }
 
 fn traversal(start: &str, links: &HashMap<String, Vec<String>>) -> HashSet<String> {
