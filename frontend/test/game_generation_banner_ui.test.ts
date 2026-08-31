@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { gameGenerationBannerMarkup, gameGenerationCopy } from '../src/game_generation_banner_ui.ts';
+import { gameFlowStatus, gameGenerationBannerMarkup, gameGenerationCopy } from '../src/game_generation_banner_ui.ts';
 import type { Game } from '../src/models.ts';
 
 function game(overrides: Partial<Game> = {}): Game {
@@ -52,6 +52,19 @@ test('game graph generation retains the live skeleton summary after screenplay e
   assert.equal(copy.edgeCount, 1);
 });
 
+test('edge generation stays on the split step even when the stage mentions saved nodes', () => {
+  const copy = gameGenerationCopy(game({
+    tasks: [{
+      id: 'graph-1', type: 'game_graph_decomposition', status: '生成中', game_id: 'game-1', progress: 68,
+      stage: '正在生成玩家选择边（已保存 22 个节点、0 条选择边）',
+      input_snapshot: { preview_received_chars: 5986, preview_node_count: 22, preview_edge_count: 0 },
+    }],
+  }))!;
+
+  assert.equal(copy.step, 2);
+  assert.match(copy.title, /第 3\/4 步：拆分视频节点/);
+});
+
 test('game graph validation retry stays on the save step while it regenerates only rejected edges', () => {
   const copy = gameGenerationCopy(game({
     tasks: [{
@@ -67,12 +80,27 @@ test('game graph validation retry stays on the save step while it regenerates on
 });
 
 test('game expansion and graph decomposition share one elapsed-time run', () => {
-  const expansion = { id: 'expand-1', type: 'game_script_expansion', status: '生成成功', game_id: 'game-1', input_snapshot: {}, started_at: '2026-08-14T10:00:00Z' };
+  const expansion = { id: 'expand-1', type: 'game_script_expansion', status: '生成成功', game_id: 'game-1', input_snapshot: {}, started_at: '2026-08-14T10:00:00Z', completed_at: '2026-08-14T10:05:00Z' };
   const graph = { id: 'graph-1', type: 'game_graph_decomposition', status: '生成中', game_id: 'game-1', input_snapshot: {}, started_at: '2026-08-14T10:05:00Z' };
   const copy = gameGenerationCopy(game({ tasks: [expansion, graph] }))!;
 
   assert.equal(copy.timerKey, 'game:game-1:expand-1');
   assert.equal(copy.timerStartedAt, expansion.started_at);
+});
+
+test('graph retry does not keep the previous expansion stopwatch', () => {
+  const expansion = {
+    id: 'expand-1', type: 'game_script_expansion', status: '生成成功', game_id: 'game-1', input_snapshot: {},
+    started_at: '2026-08-27T18:00:00Z', completed_at: '2026-08-27T18:20:00Z',
+  };
+  const graph = {
+    id: 'graph-1', type: 'game_graph_decomposition', status: '生成中', game_id: 'game-1', input_snapshot: {},
+    started_at: '2026-08-28T09:00:00Z',
+  };
+  const copy = gameGenerationCopy(game({ status: '生成失败', tasks: [expansion, graph] }))!;
+
+  assert.equal(copy.timerStartedAt, graph.started_at);
+  assert.equal(gameFlowStatus(game({ status: '生成失败', tasks: [expansion, graph] })), '生成中');
 });
 
 test('failed game generation offers to continue instead of retry', () => {

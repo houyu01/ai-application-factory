@@ -273,10 +273,10 @@ mod tests {
         });
         let context = game_node_transition_context(&game, &game["nodes"][1]);
 
-        assert!(context.contains("入口」原始文本：侦探发现封锁的侧门"));
+        assert!(context.contains("「入口」原始文本：侦探发现封锁的侧门"));
         assert!(context.contains("玩家选择「撬开封锁的侧门」"));
-        assert!(context.contains("侧门」原始文本：侦探撬开侧门进入档案室"));
+        assert!(context.contains("当前原始文本：侦探撬开侧门进入档案室"));
         assert!(context.contains("玩家选择「带着档案撤离」"));
-        assert!(context.contains("终局」原始文本：侦探带着档案离开"));
+        assert!(context.contains("「终局」原始文本：侦探带着档案离开"));
     }
 }

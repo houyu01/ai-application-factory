@@ -236,9 +236,10 @@ impl Repository {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             ).optional()?.ok_or_else(|| AppError::BadRequest("没有可重试的游戏生成任务".to_owned()))?;
             let stage = if kind == "game_script_expansion" { "等待重试剧本扩写" } else { "等待重试图谱生成" };
+            let timestamp = now();
             connection.execute(
-                "UPDATE game_tasks SET status=?1,error_message=NULL,completed_at=NULL,progress=0,stage=?2,poll_lease_until=NULL,poll_lease_token=NULL WHERE id=?3",
-                params![GENERATING, stage, id],
+                "UPDATE game_tasks SET status=?1,error_message=NULL,completed_at=NULL,progress=0,stage=?2,started_at=?3,poll_lease_until=NULL,poll_lease_token=NULL WHERE id=?4",
+                params![GENERATING, stage, timestamp, id],
             )?;
             connection.execute(
                 "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id=?3",
@@ -360,8 +361,56 @@ impl Repository {
                 params![FAILED, STALE_GAME_TASK_STAGE, STALE_GAME_TASK_ERROR, timestamp, GENERATING],
             )?;
             connection.execute(
-                "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id IN (SELECT game_id FROM game_tasks WHERE status=?1 AND stage=?3 AND completed_at=?2)",
-                params![FAILED, timestamp, STALE_GAME_TASK_STAGE],
+                "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id IN (SELECT game_id FROM game_tasks WHERE status=?1 AND stage=?3 AND completed_at=?2) AND id NOT IN (SELECT game_id FROM game_tasks WHERE status=?4 AND type IN ('game_script_expansion','game_graph_decomposition'))",
+                params![FAILED, timestamp, STALE_GAME_TASK_STAGE, GENERATING],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Keep the aggregate game card in 生成中 while a bootstrap task is still running.
+    ///
+    /// List cards and the branch-canvas badge read `interactive_games.status`, while the workbench
+    /// banner reads live `game_tasks` rows. A stale worker finishing an already-succeeded expansion
+    /// used to mark the game failed while graph decomposition continued.
+    pub(crate) fn reconcile_game_generation_status(&self, game: &mut Value) -> AppResult<()> {
+        let Some(id) = game["id"].as_str().map(str::to_owned) else {
+            return Ok(());
+        };
+        let generating = game["tasks"].as_array().is_some_and(|tasks| {
+            tasks.iter().any(|task| {
+                task["status"].as_str() == Some(GENERATING)
+                    && matches!(
+                        task["type"].as_str(),
+                        Some("game_script_expansion" | "game_graph_decomposition")
+                    )
+            })
+        });
+        if generating && game["status"].as_str() != Some(GENERATING) {
+            self.set_game_status(&id, GENERATING)?;
+            if let Some(object) = game.as_object_mut() {
+                object.insert("status".to_owned(), json!(GENERATING));
+            }
+        }
+        Ok(())
+    }
+
+    /// Mark the aggregate game failed only when no screenplay or graph task is still running.
+    pub(crate) fn fail_game_generation_if_idle(&self, game_id: &str) -> AppResult<()> {
+        self.db.with_connection(|connection| {
+            let generating = connection
+                .query_row(
+                    "SELECT 1 FROM game_tasks WHERE game_id=?1 AND status=?2 AND type IN ('game_script_expansion','game_graph_decomposition') LIMIT 1",
+                    params![game_id, GENERATING],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if generating.is_some() {
+                return Ok(());
+            }
+            connection.execute(
+                "UPDATE interactive_games SET status=?1,updated_at=?2 WHERE id=?3",
+                params![FAILED, now(), game_id],
             )?;
             Ok(())
         })

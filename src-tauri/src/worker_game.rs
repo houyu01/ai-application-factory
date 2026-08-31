@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::{
     error::{AppError, AppResult},
     planner,
-    value::{CANCELLED, FAILED, GENERATING, SUCCEEDED},
+    value::{FAILED, GENERATING, SUCCEEDED},
 };
 
 use super::{game_asset_prompt::game_asset_generation_prompt, DurableWorker};
@@ -61,9 +61,9 @@ impl DurableWorker {
                     .as_ref()
                     .ok()
                     .and_then(|value| value["status"].as_str())
-                    != Some(CANCELLED)
+                    == Some(FAILED)
             {
-                let _ = self.repository.set_game_status(game_id, FAILED);
+                let _ = self.repository.fail_game_generation_if_idle(game_id);
             }
             self.reflect_game_material_failure(&task, game_id, &error.to_string());
         }

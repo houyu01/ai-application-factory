@@ -79,7 +79,7 @@ impl Repository {
     /// Return one editor graph scoped to the owning game.
     pub fn get_game(&self, id: &str) -> AppResult<Value> {
         self.fail_expired_game_generation_tasks()?;
-        self.db.with_connection(|connection| {
+        let mut game = self.db.with_connection(|connection| {
             let mut game = connection
                 .query_row(
                     "SELECT * FROM interactive_games WHERE id=?1",
@@ -109,7 +109,9 @@ impl Repository {
             object.insert("edges".to_owned(), Value::Array(edges));
             object.insert("tasks".to_owned(), Value::Array(tasks));
             Ok(game)
-        })
+        })?;
+        self.reconcile_game_generation_status(&mut game)?;
+        Ok(game)
     }
 
     /// Delete a complete game, its playable sessions, and dependent database rows using foreign-key cascades.

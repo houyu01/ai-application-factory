@@ -4,11 +4,26 @@ export const MODEL_GENERATION_WAIT_NOTICE = '调用大模型生产时间可能�
 export const MODEL_GENERATION_EXIT_WARNING = '请勿退出应用';
 
 const TIMER_INTERVAL_MS = 1_000;
+const HAS_TIMEZONE = /[zZ]|[+-]\d{2}:?\d{2}$/;
 
 /** Parse the durable task timestamp, falling back to now for legacy rows. */
 export function generationStartedAtMs(startedAt: string | null | undefined, now = Date.now()) {
-  const parsed = Date.parse(startedAt || '');
+  const parsed = parseGenerationTimestampMs(startedAt);
   return Number.isFinite(parsed) ? Math.min(parsed, now) : now;
+}
+
+/** Backend timestamps are UTC; timezone-less values must not be read as local wall-clock. */
+export function parseGenerationTimestampMs(startedAt: string | null | undefined) {
+  const raw = (startedAt || '').trim();
+  if (!raw) return Number.NaN;
+  const parsed = Date.parse(normalizeGenerationTimestamp(raw));
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function normalizeGenerationTimestamp(value: string) {
+  let text = value.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(text) && !HAS_TIMEZONE.test(text)) text += 'Z';
+  return text;
 }
 
 /** Calculate total wall-clock time, including page changes and application downtime. */

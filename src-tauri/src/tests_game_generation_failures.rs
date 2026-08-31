@@ -9,7 +9,7 @@ use crate::{
     media::MediaStore,
     planner,
     repository::Repository,
-    value::{new_id, FAILED, GENERATING},
+    value::{new_id, FAILED, GENERATING, SUCCEEDED},
     worker::DurableWorker,
 };
 
@@ -99,7 +99,7 @@ fn failed_screenplay_expansion_is_visible_without_a_fallback() {
 }
 
 #[test]
-fn failed_graph_generation_does_not_write_a_fallback_graph() {
+fn structured_screenplay_compiles_a_playable_graph_without_a_model() {
     let (repository, root) = repository();
     let game = game(&repository);
     let game_id = game["id"].as_str().expect("game id");
@@ -107,7 +107,47 @@ fn failed_graph_generation_does_not_write_a_fallback_graph() {
         .complete_game_screenplay_expansion(
             game["task"]["id"].as_str().expect("expansion task"),
             game_id,
-            "【剧情段 S01｜开始】\n剧情正文：钟楼警报响起。\n【玩家抉择】\n【结局 E01｜成功】\n【结局 E02｜失败】",
+            "【剧情段 S01｜开始】\n剧情正文：钟楼警报响起。\n【玩家抉择】\n【结局 E01｜成功】\n结局正文：真相公开。\n【结局 E02｜失败】\n结局正文：闸门落下。",
+            20,
+            true,
+        )
+        .expect("complete expansion");
+
+    assert!(worker(repository.clone())
+        .process_once()
+        .expect("process graph"));
+
+    let saved = repository.get_game(game_id).expect("load game");
+    let task = saved["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["type"] == "game_graph_decomposition")
+        .expect("graph task");
+    assert_eq!(task["status"], SUCCEEDED);
+    let nodes = saved["nodes"].as_array().expect("nodes");
+    assert!(nodes.iter().any(|node| node["node_type"] == "start"));
+    assert!(nodes.iter().any(|node| node["node_type"] == "success"));
+    assert!(nodes.iter().any(|node| node["node_type"] == "failure"));
+    assert!(saved["edges"]
+        .as_array()
+        .is_some_and(|edges| !edges.is_empty()));
+    assert!(nodes.iter().all(|node| node["id"]
+        .as_str()
+        .is_none_or(|id| { !id.starts_with("ending_") && id != "merge" && id != "fork" })));
+    fs::remove_dir_all(root).expect("remove test data");
+}
+
+#[test]
+fn unstructured_graph_generation_does_not_write_a_fallback_graph() {
+    let (repository, root) = repository();
+    let game = game(&repository);
+    let game_id = game["id"].as_str().expect("game id");
+    repository
+        .complete_game_screenplay_expansion(
+            game["task"]["id"].as_str().expect("expansion task"),
+            game_id,
+            "调查员走进钟楼，录音机自动播放，但没有结构化剧情段。",
             20,
             true,
         )
